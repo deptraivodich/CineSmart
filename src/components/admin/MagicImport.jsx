@@ -1,146 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { parseTSV, getTSVTemplateExample } from '../../utils/MagicParser';
 import { db } from '../../services/firebase';
-import { collection, writeBatch, doc } from 'firebase/firestore';
-import { getMovies } from '../../services/movieService';
-import { formatVietnameseSentenceCase } from '../../utils/textUtils';
+import { collection, getDocsFromServer, doc, runTransaction } from 'firebase/firestore';
+import { findMovie, planImport, episodeKey, MOVIE_FIELDS, sourceMovieId } from '../../utils/movieImport.js';
+import { crawlManualUrl, detailsToTSV } from '../../services/phimApiImport.js';
 
-/**
- * Timeout helper to prevent Promise hanging indefinitely when Firestore is slow/offline
- */
-const withTimeout = (promise, ms = 3500) => {
-  return Promise.race([
-    promise,
-    new Promise((_, reject) => setTimeout(() => reject(new Error(`Quá thời gian kết nối Firestore (${ms}ms)`)), ms))
-  ]);
-};
-
-/**
- * Sanitizes an object by removing undefined values, functions, and non-plain data
- * to prevent Firestore SDK from crashing or rejecting payloads.
- */
-const sanitizeFirestoreData = (obj) => {
-  if (obj === null || obj === undefined) return null;
-  if (typeof obj !== 'object') return obj;
-
-  if (Array.isArray(obj)) {
-    return obj
-      .map(item => sanitizeFirestoreData(item))
-      .filter(item => item !== undefined);
-  }
-
-  const clean = {};
-  for (const [key, value] of Object.entries(obj)) {
-    if (value !== undefined && typeof value !== 'function') {
-      clean[key] = sanitizeFirestoreData(value);
-    }
-  }
-  return clean;
-};
-
-/**
- * Normalizes title string for exact and fuzzy matching (ignoring symbols & spaces)
- */
-const normalizeTitle = (str) => {
-  return String(str || '')
-    .trim()
-    .toLowerCase()
-    .replace(/[\s:()_\-–.]+/g, '');
-};
-
-/**
- * Normalizes episode identifier string (e.g. "Tập 1", "01", "1" -> "1")
- */
-const normalizeEpisodeKey = (nameOrNum) => {
-  const str = String(nameOrNum || '').trim();
-  const match = str.match(/\d+/);
-  return match ? String(parseInt(match[0], 10)) : str.toLowerCase();
-};
-
-/**
- * Helper to find episodes in incomingList that do NOT exist in existingList
- */
-const findNewEpisodesOnly = (existingList = [], incomingList = []) => {
-  const existingSet = new Set();
-  if (Array.isArray(existingList)) {
-    for (const ep of existingList) {
-      if (!ep) continue;
-      const key = normalizeEpisodeKey(ep.name || ep.number);
-      if (key) existingSet.add(key);
-    }
-  }
-
-  const newEps = [];
-  if (Array.isArray(incomingList)) {
-    for (const ep of incomingList) {
-      if (!ep) continue;
-      const key = normalizeEpisodeKey(ep.name || ep.number);
-      if (key && !existingSet.has(key)) {
-        newEps.push(ep);
-      }
-    }
-  }
-
-  return newEps;
-};
-
-/**
- * Helper to merge episodes without duplicates and sort numerically
- */
-const mergeEpisodesList = (existingList = [], incomingList = []) => {
-  const map = new Map();
-
-  // 1. Insert existing episodes
-  if (Array.isArray(existingList)) {
-    for (let i = 0; i < existingList.length; i++) {
-      const ep = existingList[i];
-      if (!ep) continue;
-      const key = normalizeEpisodeKey(ep.name || ep.number || (i + 1));
-      const displayKey = String(ep.name || ep.number || (i + 1)).trim();
-      const url = String(ep.url || ep.m3u8Url || '').trim();
-      if (key && url) {
-        map.set(key, { name: displayKey, url });
-      }
-    }
-  }
-
-  // 2. Insert or overwrite with incoming episodes
-  if (Array.isArray(incomingList)) {
-    for (let i = 0; i < incomingList.length; i++) {
-      const ep = incomingList[i];
-      if (!ep) continue;
-      const key = normalizeEpisodeKey(ep.name || ep.number || (i + 1));
-      const displayKey = String(ep.name || ep.number || (i + 1)).trim();
-      const url = String(ep.url || ep.m3u8Url || '').trim();
-      if (key && url) {
-        map.set(key, { name: displayKey, url });
-      }
-    }
-  }
-
-  // 3. Sort numerically from episode 1 to N
-  const sorted = Array.from(map.values()).sort((a, b) => {
-    const numA = parseFloat(a.name.replace(/[^\d.]/g, '')) || 0;
-    const numB = parseFloat(b.name.replace(/[^\d.]/g, '')) || 0;
-    return numA - numB;
-  });
-
-  return sorted;
-};
-
-/**
- * Component MagicImport Upgrade:
- * 1. Hỗ trợ bỏ link CẢ MỘT TRANG danh sách hoặc 1 phim lẻ vào ô Input URL.
- * 2. Phân tích 3 Kịch bản đối chiếu với DB:
- *    - Status 'new': Phim chưa có trong DB (+1 Tạo mới).
- *    - Status 'update': Phim có trong DB + Có tập mới (+1 Tự động gộp).
- *    - Status 'duplicate': Phim có trong DB + Không có tập mới (+1 Đã trùng - Bỏ qua).
- * 3. Hiển thị 3 bộ đếm (Tạo mới, Tự động gộp, Đã trùng) & Bảng Preview thông minh.
- */
 const MagicImport = () => {
   const [rawText, setRawText] = useState('');
   const [parsedData, setParsedData] = useState([]);
-  const [existingMovies, setExistingMovies] = useState([]);
+  const [, setExistingMovies] = useState([]);
   const [isParsing, setIsParsing] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState(null);
@@ -179,8 +47,8 @@ const MagicImport = () => {
 
         if (response.ok) {
           const resData = await response.json();
-          if (resData.status && resData.tsv) {
-            tsvResult = resData.tsv;
+          if (resData.status && (resData.movies?.length || resData.tsv)) {
+            tsvResult = resData.movies?.length ? detailsToTSV(resData.movies) : resData.tsv;
             crawledCount = resData.crawled_count || 1;
           }
         }
@@ -190,164 +58,9 @@ const MagicImport = () => {
 
       // 2. Client-side Fetch Fallback nếu Backend chưa được khởi chạy
       if (!tsvResult) {
-        const lowerUrl = rawInput.toLowerCase();
-        const isList = lowerUrl.includes('/danh-sach/') || lowerUrl.includes('/quoc-gia/') || lowerUrl.includes('/the-loai/') || lowerUrl.includes('phimapi.com/v1/api/') || lowerUrl.includes('page=');
-
-        if (isList) {
-          // Client Fallback: Trang Danh Sách
-          let listApiUrl = rawInput;
-          if (!rawInput.includes('phimapi.com/v1/api/')) {
-            const path = rawInput.replace(/^https?:\/\/[^\/]+/, '').split('?')[0].replace(/\/+$/, '');
-            const query = rawInput.includes('?') ? rawInput.split('?')[1] : '';
-            if (path.includes('/danh-sach/')) {
-              const cat = path.split('/danh-sach/')[1];
-              listApiUrl = `https://phimapi.com/v1/api/danh-sach/${cat}${query ? '?' + query : ''}`;
-            } else if (path.includes('/quoc-gia/')) {
-              const cat = path.split('/quoc-gia/')[1];
-              listApiUrl = `https://phimapi.com/v1/api/quoc-gia/${cat}${query ? '?' + query : ''}`;
-            } else if (path.includes('/the-loai/')) {
-              const cat = path.split('/the-loai/')[1];
-              listApiUrl = `https://phimapi.com/v1/api/the-loai/${cat}${query ? '?' + query : ''}`;
-            }
-          }
-
-          const res = await fetch(listApiUrl);
-          if (!res.ok) throw new Error('Không thể truy cập API danh sách phim!');
-          const listJson = await res.json();
-          const items = listJson.data?.items || listJson.items || [];
-          if (!items.length) throw new Error('Không tìm thấy phim nào trong trang danh sách này!');
-
-          // Promise.all cào đồng thời chi tiết các phim
-          const moviePromises = items.map(async (item) => {
-            try {
-              const mRes = await fetch(`https://phimapi.com/phim/${item.slug}`);
-              if (!mRes.ok) return null;
-              const mData = await mRes.json();
-              return mData.status ? mData : null;
-            } catch (e) {
-              return null;
-            }
-          });
-
-          const movieResults = (await Promise.all(moviePromises)).filter(Boolean);
-          if (!movieResults.length) throw new Error('Tất cả các phim trong danh sách đều không cào được!');
-
-          crawledCount = movieResults.length;
-          const headers = ["Tên Phim", "Tên Gốc", "Tập", "Link Video", "Ảnh bìa", "Điểm IMDb", "Năm", "Quốc Gia", "Thể Loại"];
-          const lines = [headers.join('\t')];
-
-          movieResults.forEach(data => {
-            const movie = data.movie || {};
-            const title = movie.name || '';
-            const originalTitle = movie.origin_name || '';
-            const year = String(movie.year || '2026');
-            let posterUrl = movie.poster_url || movie.thumb_url || '';
-            if (posterUrl && !posterUrl.startsWith('http')) posterUrl = `https://phimimg.com/${posterUrl}`;
-            const rawScore = movie.imdb?.vote_average || movie.tmdb?.vote_average;
-            const imdb = rawScore ? `${rawScore} /10` : '';
-
-            const countryData = movie.country;
-            let countryStr = '';
-            if (Array.isArray(countryData)) {
-              countryStr = countryData.map(c => c?.name || c).filter(Boolean).join(', ');
-            } else if (countryData && typeof countryData === 'object') {
-              countryStr = countryData.name || '';
-            } else {
-              countryStr = String(countryData || '');
-            }
-
-            const directorData = movie.director;
-            let directorStr = '';
-            if (Array.isArray(directorData)) {
-              directorStr = directorData.map(d => d?.name || d).filter(Boolean).join(', ');
-            } else if (directorData && typeof directorData === 'object') {
-              directorStr = directorData.name || '';
-            } else {
-              directorStr = String(directorData || '');
-            }
-
-            const statusStr = String(movie.status || 'ongoing').trim();
-            const epCurrentStr = String(movie.episode_current || '').trim();
-
-            const serverData = data.episodes?.[0]?.server_data || [];
-            serverData.forEach((ep, index) => {
-              const rawEpName = ep.name || String(index + 1);
-              const epUrl = ep.link_m3u8 || ep.link_embed || '';
-              const match = String(rawEpName).match(/\d+/);
-              const epNum = match ? String(parseInt(match[0], 10)) : String(rawEpName);
-
-              if (index === 0) {
-                lines.push([title, originalTitle, epNum, epUrl, posterUrl, imdb, year, countryStr, directorStr, statusStr, epCurrentStr, ''].join('\t'));
-              } else {
-                lines.push(['', '', epNum, epUrl, '', '', '', '', '', '', '', ''].join('\t'));
-              }
-            });
-          });
-
-          tsvResult = lines.join('\n');
-        } else {
-          // Client Fallback: Phim lẻ
-          const slug = rawInput.replace(/\/+$/, '').split('/').pop();
-          const directApiUrl = `https://phimapi.com/phim/${slug}`;
-          const res = await fetch(directApiUrl);
-          if (!res.ok) throw new Error('Không thể kết nối API PhimAPI!');
-          const data = await res.json();
-          if (!data.status || !data.movie) throw new Error('API báo không tìm thấy phim này!');
-
-          crawledCount = 1;
-          const movie = data.movie;
-          const title = movie.name || '';
-          const originalTitle = movie.origin_name || '';
-          const year = String(movie.year || '2026');
-          let posterUrl = movie.poster_url || movie.thumb_url || '';
-          if (posterUrl && !posterUrl.startsWith('http')) posterUrl = `https://phimimg.com/${posterUrl}`;
-          const rawScore = movie.imdb?.vote_average || movie.tmdb?.vote_average;
-          const imdb = rawScore ? `${rawScore} /10` : '';
-
-          const countryData = movie.country;
-          let countryStr = '';
-          if (Array.isArray(countryData)) {
-            countryStr = countryData.map(c => c?.name || c).filter(Boolean).join(', ');
-          } else if (countryData && typeof countryData === 'object') {
-            countryStr = countryData.name || '';
-          } else {
-            countryStr = String(countryData || '');
-          }
-
-          const directorData = movie.director;
-          let directorStr = '';
-          if (Array.isArray(directorData)) {
-            directorStr = directorData.map(d => d?.name || d).filter(Boolean).join(', ');
-          } else if (directorData && typeof directorData === 'object') {
-            directorStr = directorData.name || '';
-          } else {
-            directorStr = String(directorData || '');
-          }
-
-          const statusStr = String(movie.status || 'ongoing').trim();
-          const epCurrentStr = String(movie.episode_current || '').trim();
-
-          const serverData = data.episodes?.[0]?.server_data || [];
-          if (!serverData.length) throw new Error('Không tìm thấy danh sách tập phim!');
-
-          const headers = ["Tên Phim", "Tên Gốc", "Tập", "Link Video", "Ảnh bìa", "Điểm IMDb", "Năm", "Quốc Gia", "Đạo Diễn", "Thông Tin", "Tập hiện tại", "Thể Loại"];
-          const lines = [headers.join('\t')];
-
-          serverData.forEach((ep, index) => {
-            const rawEpName = ep.name || String(index + 1);
-            const epUrl = ep.link_m3u8 || ep.link_embed || '';
-            const match = String(rawEpName).match(/\d+/);
-            const epNum = match ? String(parseInt(match[0], 10)) : String(rawEpName);
-
-            if (index === 0) {
-              lines.push([title, originalTitle, epNum, epUrl, posterUrl, imdb, year, countryStr, directorStr, statusStr, epCurrentStr, ''].join('\t'));
-            } else {
-              lines.push(['', '', epNum, epUrl, '', '', '', '', '', '', '', ''].join('\t'));
-            }
-          });
-
-          tsvResult = lines.join('\n');
-        }
+        const result = await crawlManualUrl(rawInput);
+        tsvResult = result.tsv;
+        crawledCount = result.count;
       }
 
       setRawText(tsvResult);
@@ -367,18 +80,14 @@ const MagicImport = () => {
 
   // Fetch current existing movies in database to detect matches
   const loadExistingMovies = async () => {
-    try {
-      const list = await getMovies();
-      setExistingMovies(list || []);
-      return list || [];
-    } catch (e) {
-      console.warn("Could not load existing movies for smart merge check:", e);
-      return [];
-    }
+    const snapshot = await getDocsFromServer(collection(db, 'movies'));
+    const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id }));
+    setExistingMovies(list);
+    return list;
   };
 
   useEffect(() => {
-    loadExistingMovies();
+    loadExistingMovies().catch(() => setErrorMessage('Firestore unavailable. Check Admin permissions and connection.'));
   }, []);
 
   /**
@@ -389,6 +98,7 @@ const MagicImport = () => {
    */
   const handleParse = async () => {
     setErrorMessage('');
+    setParsedData([]);
     setUploadStatus(null);
     if (!rawText.trim()) {
       setErrorMessage('Vui lòng dán dữ liệu TSV từ Excel vào ô văn bản bên dưới.');
@@ -400,133 +110,32 @@ const MagicImport = () => {
       const currentDbMovies = await loadExistingMovies();
       const results = parseTSV(rawText);
 
-      const annotatedResults = results.map(movie => {
-        const formattedTitle = formatVietnameseSentenceCase(movie.title);
-        const normTitle = normalizeTitle(formattedTitle);
-        const normOrig = normalizeTitle(movie.originalTitle);
-        const normSlug = normalizeTitle(movie.slug);
-
-        // Tim kiem phim trong DB theo Title hoặc Original Title hoặc Slug (Bỏ qua so sánh Ảnh Bìa)
-        const match = (currentDbMovies || []).find(m => {
-          const mTitle = normalizeTitle(m.title);
-          const mOrig = normalizeTitle(m.originalTitle);
-          const mSlug = normalizeTitle(m.slug || m.id);
-          return (
-            (normSlug && mSlug && normSlug === mSlug) ||
-            (normTitle && mTitle === normTitle) ||
-            (normOrig && mOrig && normOrig === mOrig)
-          );
-        });
-
-        // -------------------------------------------------------------------
-        // KỊCH BẢN 1: PHIM CHƯA CÓ TRONG DB -> status = 'new'
-        // -------------------------------------------------------------------
-        if (!match) {
-          return {
-            ...movie,
-            title: formattedTitle,
-            status: 'new',
-            isExistingMatch: false,
-            newEpisodes: movie.episodes || [],
-            newEpisodesCount: movie.episodes?.length || 1,
-            existingEpisodesCount: 0,
-            totalAfterMergeCount: movie.episodes?.length || 1,
-            mergedEpisodes: movie.episodes || []
-          };
-        }
-
-        // Phim đã có trong DB -> Trích xuất mảng tập đang có
-        const existingEps = Array.isArray(match.episodes) && match.episodes.length > 0 
-          ? match.episodes 
-          : [{ name: '1', url: match.m3u8Url || '' }];
-
-        const incomingCountry = String(movie.country || '').trim();
-        const existingCountry = String(match.country || '').trim();
-        const hasCountryUpdate = Boolean(incomingCountry && incomingCountry !== existingCountry);
-
-        const incomingDirector = String(movie.director || '').trim();
-        const existingDirector = String(match.director || '').trim();
-        const hasDirectorUpdate = Boolean(incomingDirector && incomingDirector !== existingDirector && incomingDirector !== 'Đang cập nhật');
-
-        const incomingStatus = String(movie.status || '').trim();
-        const existingStatus = String(match.status || '').trim();
-        const hasStatusUpdate = Boolean(incomingStatus && incomingStatus !== existingStatus);
-
-        const incomingEpCurrent = String(movie.episodeCurrent || movie.episodesStatus || '').trim();
-        const existingEpCurrent = String(match.episodeCurrent || match.episodesStatus || '').trim();
-        const hasEpisodeCurrentUpdate = Boolean(incomingEpCurrent && incomingEpCurrent !== existingEpCurrent);
-
-        // Trích xuất CHỈ NHỮNG TẬP MỚI
-        const newEpsOnly = findNewEpisodesOnly(existingEps, movie.episodes || []);
-        const hasNewEpisodes = newEpsOnly.length > 0;
-        const merged = mergeEpisodesList(existingEps, movie.episodes || []);
-
-        const hasAnyUpdate = hasNewEpisodes || hasCountryUpdate || hasDirectorUpdate || hasStatusUpdate || hasEpisodeCurrentUpdate;
-
-        if (hasAnyUpdate) {
-          // -------------------------------------------------------------------
-          // KỊCH BẢN 2: PHIM ĐÃ CÓ TRONG DB, CÓ THAY ĐỔI 1 TRONG 5 TRƯỜNG -> status = 'update'
-          // -------------------------------------------------------------------
-          const updateReasons = [];
-          if (hasNewEpisodes) updateReasons.push(`+${newEpsOnly.length} Tập Mới`);
-          if (hasCountryUpdate) updateReasons.push(`Quốc gia (${incomingCountry})`);
-          if (hasDirectorUpdate) updateReasons.push(`Đạo diễn (${incomingDirector})`);
-          if (hasStatusUpdate) updateReasons.push(`Trạng thái (${incomingStatus})`);
-          if (hasEpisodeCurrentUpdate) updateReasons.push(`Tập hiện tại (${incomingEpCurrent})`);
-
-          const updateReasonText = `🔄 Gộp (${updateReasons.join(', ')})`;
-
-          return {
-            ...movie,
-            title: formattedTitle,
-            status: 'update',
-            isExistingMatch: true,
-            matchedMovieId: match.id,
-            matchedMovieTitle: match.title,
-            hasNewEpisodes,
-            hasCountryUpdate,
-            hasDirectorUpdate,
-            hasStatusUpdate,
-            hasEpisodeCurrentUpdate,
-            updateReasonText,
-            country: incomingCountry || existingCountry,
-            director: incomingDirector || existingDirector,
-            movieStatus: incomingStatus || existingStatus,
-            episodeCurrent: incomingEpCurrent || existingEpCurrent,
-            episodesStatus: incomingEpCurrent || movie.episodesStatus || match.episodesStatus,
-            newEpisodes: newEpsOnly,
-            newEpisodesCount: newEpsOnly.length,
-            existingEpisodesCount: existingEps.length,
-            totalAfterMergeCount: merged.length,
-            mergedEpisodes: merged
-          };
-        } else {
-          // -------------------------------------------------------------------
-          // KỊCH BẢN 3: PHIM ĐÃ CÓ TRONG DB, KHÔNG CÓ BẤT KỲ THAY ĐỔI NÀO -> status = 'duplicate'
-          // -------------------------------------------------------------------
-          return {
-            ...movie,
-            title: formattedTitle,
-            status: 'duplicate',
-            isExistingMatch: true,
-            matchedMovieId: match.id,
-            matchedMovieTitle: match.title,
-            hasNewEpisodes: false,
-            hasCountryUpdate: false,
-            hasDirectorUpdate: false,
-            hasStatusUpdate: false,
-            hasEpisodeCurrentUpdate: false,
-            country: existingCountry || incomingCountry,
-            director: existingDirector || incomingDirector,
-            episodeCurrent: existingEpCurrent || incomingEpCurrent,
-            newEpisodes: [],
-            newEpisodesCount: 0,
-            existingEpisodesCount: existingEps.length,
-            totalAfterMergeCount: existingEps.length,
-            mergedEpisodes: existingEps
-          };
-        }
-      });
+      const annotatedResults = [];
+      const catalog = [...currentDbMovies];
+      for (const movie of results) {
+        const match = findMovie(catalog, movie);
+        const plan = planImport(match, movie);
+        const existingEps = Array.isArray(match?.episodes) ? match.episodes : [];
+        const merged = plan.data.episodes || existingEps;
+        const row = {
+          ...movie,
+          movieStatus: movie.status,
+          status: plan.action === 'skip' ? 'duplicate' : plan.action,
+          isExistingMatch: Boolean(match),
+          matchedMovieId: match?.id,
+          matchedMovieTitle: match?.title,
+          hasNewEpisodes: plan.added > 0,
+          updateReasonText: plan.added ? `🔄 Gộp +${plan.added} tập mới` : '🔄 Thông tin hoặc liên kết tập phim có thay đổi',
+          newEpisodes: movie.episodes.filter(ep => !existingEps.some(old => episodeKey(old.name) === episodeKey(ep.name))),
+          newEpisodesCount: plan.added,
+          existingEpisodesCount: existingEps.length,
+          totalAfterMergeCount: merged.length,
+          mergedEpisodes: merged
+        };
+        annotatedResults.push(row);
+        // Detect duplicate entries within the same pasted list as well.
+        if (!match) catalog.push({ ...plan.data, id: 'preview-' + annotatedResults.length });
+      }
 
       setParsedData(annotatedResults);
       if (annotatedResults.length === 0) {
@@ -547,217 +156,49 @@ const MagicImport = () => {
 
   // Nạp dữ liệu lên Database (Bỏ qua các phim có status === 'duplicate')
   const handleUploadToFirebase = async () => {
-    if (parsedData.length === 0) {
-      setErrorMessage('Không có dữ liệu phim nào để nạp.');
-      return;
-    }
-
-    // CHỈ NẠP CÁC PHIM TẠO MỚI ('new') HOẶC CÓ TẬP MỚI ('update') - BỎ QUA 'duplicate'
     const validMovies = parsedData.filter(m => m.isValid && m.status !== 'duplicate');
-    if (validMovies.length === 0) {
-      setErrorMessage('Tất cả các phim trong danh sách phân tích đều ĐÃ TRÙNG HOÀN TOÀN với Database (Đã bỏ qua). Không có tập mới nào để nạp!');
+    if (!validMovies.length) {
+      setErrorMessage('Không có phim mới hoặc thay đổi hợp lệ để nạp.');
       return;
     }
-
     setIsUploading(true);
     setErrorMessage('');
-    setUploadStatus({ 
-      type: 'info', 
-      text: `Đang khởi tạo Batch Write cho ${validMovies.length} bộ phim (Đã bỏ qua các phim trùng)...` 
-    });
-
+    setUploadStatus({ type: 'info', text: 'Đang xác minh và ghi Firestore...' });
+    let written = 0, updated = 0, skipped = 0;
     try {
-      const BATCH_SIZE = 400;
-      let totalImported = 0;
-      let totalMerged = 0;
-
-      for (let i = 0; i < validMovies.length; i += BATCH_SIZE) {
-        const batch = writeBatch(db);
-        const chunk = validMovies.slice(i, i + BATCH_SIZE);
-
-        chunk.forEach((movie) => {
-          const { 
-            isValid, 
-            missingFields, 
-            status,
-            isExistingMatch, 
-            matchedMovieId, 
-            matchedMovieTitle, 
-            existingEpisodesCount, 
-            totalAfterMergeCount, 
-            newEpisodes,
-            newEpisodesCount,
-            mergedEpisodes, 
-            ...cleanMovie 
-          } = movie;
-
-          const finalTitle = formatVietnameseSentenceCase(cleanMovie.title);
-          const finalEpisodes = mergedEpisodes || cleanMovie.episodes || [];
-
-          if (status === 'update' && matchedMovieId) {
-            // KỊCH BẢN 2: CẬP NHẬT GỘP TẬP MỚI HOẶC QUỐC GIA VÀO PHIM CŨ
-            totalMerged++;
-            const movieRef = doc(db, 'movies', matchedMovieId);
-            const updatePayload = sanitizeFirestoreData({
-              ...cleanMovie,
-              title: finalTitle,
-              id: matchedMovieId,
-              episodes: finalEpisodes,
-              episodesCount: `${finalEpisodes.length} Tập`,
-              episodesStatus: movie.episodeCurrent || movie.episodesStatus || `Tập ${finalEpisodes.length}`,
-              episodeCurrent: movie.episodeCurrent || cleanMovie.episodeCurrent || `Tập ${finalEpisodes.length}`,
-              country: movie.country || cleanMovie.country || '',
-              director: movie.director || cleanMovie.director || '',
-              status: movie.movieStatus || cleanMovie.status || 'ongoing',
-              m3u8Url: finalEpisodes[0]?.url || cleanMovie.m3u8Url || '',
-              updatedAt: new Date().toISOString()
-            });
-
-            batch.set(movieRef, updatePayload, { merge: true });
-          } else if (status === 'new') {
-            // KỊCH BẢN 1: TẠO PHIM MỚI
-            const movieRef = doc(collection(db, 'movies'));
-            const createPayload = sanitizeFirestoreData({
-              ...cleanMovie,
-              title: finalTitle,
-              episodes: finalEpisodes,
-              episodesCount: `${finalEpisodes.length} Tập`,
-              episodesStatus: `Tập hoàn tất (${finalEpisodes.length}/${finalEpisodes.length})`,
-              m3u8Url: finalEpisodes[0]?.url || cleanMovie.m3u8Url || '',
-              createdAt: new Date().toISOString()
-            });
-
-            batch.set(movieRef, createPayload);
-          }
+      const catalog = await loadExistingMovies();
+      for (const movie of validMovies) {
+        const incoming = Object.fromEntries([...MOVIE_FIELDS, 'episodes'].filter(k => movie[k] !== undefined).map(k => [k, movie[k]]));
+        incoming.status = movie.movieStatus || 'ongoing';
+        const match = findMovie(catalog, incoming);
+        const ref = match ? doc(db, 'movies', match.id) : incoming.sourceSlug ? doc(db, 'movies', sourceMovieId(incoming.sourceSlug)) : doc(collection(db, 'movies'));
+        const saved = await runTransaction(db, async tx => {
+          const snapshot = await tx.get(ref);
+          const existing = snapshot.exists() ? snapshot.data() : null;
+          const plan = planImport(existing, incoming);
+          if (plan.action === 'new') tx.set(ref, plan.data);
+          else if (plan.action === 'update') tx.update(ref, plan.data);
+          return { action: plan.action, movie: { ...existing, ...plan.data, id: ref.id } };
         });
-
-        await withTimeout(batch.commit(), 4000);
-        totalImported += chunk.length;
-
-        setUploadStatus({ 
-          type: 'info', 
-          text: `Đang xử lý: Đã nạp ${totalImported}/${validMovies.length} phim (Gộp ${totalMerged} phim cũ)...` 
-        });
+        if (saved.action === 'skip') skipped++;
+        else { written++; if (saved.action === 'update') updated++; }
+        const index = catalog.findIndex(m => m.id === ref.id);
+        if (index < 0) catalog.push(saved.movie); else catalog[index] = saved.movie;
       }
-
-      // Sync to local storage database cache
-      try {
-        const localMovies = JSON.parse(localStorage.getItem('210loliphim_movies_db') || '[]');
-        let mergedList = [...localMovies];
-
-        validMovies.forEach(vm => {
-          const finalTitle = formatVietnameseSentenceCase(vm.title);
-          const normTitle = normalizeTitle(finalTitle);
-          const existIdx = mergedList.findIndex(m => normalizeTitle(m.title) === normTitle);
-
-          const { isValid, missingFields, status, isExistingMatch, matchedMovieId, matchedMovieTitle, existingEpisodesCount, totalAfterMergeCount, newEpisodes, newEpisodesCount, mergedEpisodes, ...cleanMovie } = vm;
-          const finalEpisodes = mergedEpisodes || cleanMovie.episodes || [];
-
-          if (existIdx >= 0 && status === 'update') {
-            const oldMovie = mergedList[existIdx];
-            mergedList[existIdx] = {
-              ...oldMovie,
-              ...cleanMovie,
-              title: finalTitle,
-              id: oldMovie.id,
-              episodes: finalEpisodes,
-              episodesCount: `${finalEpisodes.length} Tập`,
-              episodesStatus: `Tập hoàn tất (${finalEpisodes.length}/${finalEpisodes.length})`,
-              m3u8Url: finalEpisodes[0]?.url || oldMovie.m3u8Url,
-              updatedAt: new Date().toISOString()
-            };
-          } else if (status === 'new') {
-            mergedList.unshift({
-              ...cleanMovie,
-              title: finalTitle,
-              episodes: finalEpisodes,
-              episodesCount: `${finalEpisodes.length} Tập`,
-              episodesStatus: `Tập hoàn tất (${finalEpisodes.length}/${finalEpisodes.length})`,
-              m3u8Url: finalEpisodes[0]?.url || cleanMovie.m3u8Url,
-              id: `imported_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
-              createdAt: new Date().toISOString()
-            });
-          }
-        });
-
-        localStorage.setItem('210loliphim_movies_db', JSON.stringify(mergedList));
-      } catch (cacheErr) {
-        console.warn("Local storage cache sync note:", cacheErr);
-      }
-
-      setUploadStatus({ 
-        type: 'success', 
-        text: `🎉 HOÀN THÀNH: Đã nạp thành công ${totalImported} phim! (Tự động gộp ${totalMerged} phim có tập mới).` 
-      });
-      
+      // Cache only the documents confirmed by Firestore, using their real IDs.
+      try { localStorage.setItem('210loliphim_movies_db', JSON.stringify(catalog)); }
+      catch { console.warn('Không cập nhật được cache; dữ liệu đã được ghi Firestore.'); }
+      window.dispatchEvent(new CustomEvent('210loliphim_movies_updated'));
+      setUploadStatus({ type: 'success', text: `Đã ghi Firestore ${written} phim (cập nhật ${updated}, bỏ qua ${skipped}).` });
       await loadExistingMovies();
     } catch (err) {
-      console.warn("Firestore Batch Write note, performing resilient fallback:", err);
-
-      try {
-        const localMovies = JSON.parse(localStorage.getItem('210loliphim_movies_db') || '[]');
-        let mergedList = [...localMovies];
-        let totalMerged = 0;
-
-        validMovies.forEach(vm => {
-          const finalTitle = formatVietnameseSentenceCase(vm.title);
-          const normTitle = normalizeTitle(finalTitle);
-          const existIdx = mergedList.findIndex(m => normalizeTitle(m.title) === normTitle);
-
-          const { isValid, missingFields, status, isExistingMatch, matchedMovieId, matchedMovieTitle, existingEpisodesCount, totalAfterMergeCount, newEpisodes, newEpisodesCount, mergedEpisodes, ...cleanMovie } = vm;
-          const finalEpisodes = mergedEpisodes || cleanMovie.episodes || [];
-
-          if (existIdx >= 0 && status === 'update') {
-            totalMerged++;
-            const oldMovie = mergedList[existIdx];
-            mergedList[existIdx] = {
-              ...oldMovie,
-              ...cleanMovie,
-              title: finalTitle,
-              id: oldMovie.id,
-              episodes: finalEpisodes,
-              episodesCount: `${finalEpisodes.length} Tập`,
-              episodesStatus: `Tập hoàn tất (${finalEpisodes.length}/${finalEpisodes.length})`,
-              m3u8Url: finalEpisodes[0]?.url || oldMovie.m3u8Url,
-              updatedAt: new Date().toISOString()
-            };
-          } else if (status === 'new') {
-            mergedList.unshift({
-              ...cleanMovie,
-              title: finalTitle,
-              episodes: finalEpisodes,
-              episodesCount: `${finalEpisodes.length} Tập`,
-              episodesStatus: `Tập hoàn tất (${finalEpisodes.length}/${finalEpisodes.length})`,
-              m3u8Url: finalEpisodes[0]?.url || cleanMovie.m3u8Url,
-              id: `imported_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
-              createdAt: new Date().toISOString()
-            });
-          }
-        });
-
-        localStorage.setItem('210loliphim_movies_db', JSON.stringify(mergedList));
-        setExistingMovies(mergedList);
-
-        setUploadStatus({ 
-          type: 'success', 
-          text: `🚀 THÀNH CÔNG: Đã lưu trữ an toàn ${validMovies.length} phim (Gộp ${totalMerged} phim cũ) vào kho dữ liệu!` 
-        });
-      } catch (storageErr) {
-        console.error("Local storage sync error:", storageErr);
-        const errorMsg = `Lỗi nạp dữ liệu: ${err.message || storageErr.message}`;
-        setErrorMessage(errorMsg);
-        setUploadStatus({ 
-          type: 'error', 
-          text: `❌ ${errorMsg}` 
-        });
-        alert(errorMsg);
-      }
+      setErrorMessage('Không hoàn tất ghi Firestore: ' + err.message);
+      setUploadStatus({ type: 'error', text: `Đã ghi ${written} phim trước lỗi. Hãy kiểm tra kết nối/quyền Firestore và phân tích lại; không có thông báo thành công bằng cache.` });
     } finally {
       setIsUploading(false);
     }
   };
 
-  // Tính toán 3 bộ đếm cho UI
   const countNew = parsedData.filter(m => m.status === 'new').length;
   const countUpdate = parsedData.filter(m => m.status === 'update').length;
   const countDuplicate = parsedData.filter(m => m.status === 'duplicate').length;
@@ -1045,7 +486,7 @@ const MagicImport = () => {
                       ) : (
                         <div className="flex items-center gap-2">
                           <span className="px-2.5 py-0.5 rounded-full bg-neon-cyan/20 text-neon-cyan font-black text-[11px] border border-neon-cyan/30">
-                            +{movie.newEpisodesCount || movie.episodes?.length || 1} Tập mới
+                            +{movie.newEpisodesCount ?? movie.episodes?.length ?? 0} Tập mới
                           </span>
                           {movie.episodes?.length > 1 && (
                             <button

@@ -5,11 +5,14 @@
  * Fully supports 'Ảnh bìa' (Poster / Banner) column mapping in any column order.
  */
 
-import { formatVietnameseSentenceCase } from './textUtils';
+import { formatVietnameseSentenceCase } from './textUtils.js';
 export { formatVietnameseSentenceCase };
 
 // Flexible Column Alias Mapping Dictionary
 const COLUMN_ALIASES = {
+  sourceSlug: ['sourceslug'],
+  sourceUpdatedAt: ['sourceupdatedat'],
+  episodesStatus: ['episodesstatus'],
   title: ['title', 'tên phim', 'tên', 'name', 'movie_name', 'phim', 'ten phim'],
   originalTitle: ['originaltitle', 'tên gốc', 'ten goc', 'tên tiếng anh', 'original_name', 'english_title'],
   episode: ['tập', 'tap', 'episode', 'ep', 'episodes', 'số tập', 'so tap', 'tập số'],
@@ -104,6 +107,7 @@ export const parseTSV = (rawText) => {
 
   const parsedMovies = [];
   let currentMovie = null;
+  let explicitEpisodeCurrent = false;
 
   // Process data rows from Row 2 onwards
   for (let i = 1; i < rawLines.length; i++) {
@@ -132,7 +136,7 @@ export const parseTSV = (rawText) => {
 
       // Extract custom poster & banner from 'Ảnh bìa' or 'Poster'
       const customImage = (rawObject.banner || rawObject.poster || '').trim();
-      const posterUrl = customImage || DEFAULT_POSTER;
+      const posterUrl = rawObject.poster || customImage || DEFAULT_POSTER;
       const bannerUrl = (rawObject.banner || customImage) || DEFAULT_BANNER;
 
       const movieData = {
@@ -163,6 +167,17 @@ export const parseTSV = (rawText) => {
 
       if (!epUrl) movieData.missingFields.push('Link Video Tập 1');
 
+      if (rawObject.sourceSlug) {
+        for (const key of ['originalTitle', 'poster', 'banner', 'imdb', 'year', 'country', 'director', 'quality', 'description', 'ageRating', 'sourceSlug', 'sourceUpdatedAt']) {
+          movieData[key] = rawObject[key] || '';
+        }
+        movieData.genres = rawObject.genres ? parseGenresArray(rawObject.genres) : [];
+        movieData.category = movieData.genres.join(', ');
+        movieData.status = rawObject.status || '';
+        movieData.episodeCurrent = rawObject.episodeCurrent || '';
+        movieData.episodesStatus = rawObject.episodesStatus || rawObject.episodeCurrent || '';
+      }
+      explicitEpisodeCurrent = Boolean(rawObject.sourceSlug || rawObject.episodeCurrent || rawObject.episodesStatus);
       currentMovie = movieData;
       parsedMovies.push(movieData);
     } 
@@ -180,7 +195,7 @@ export const parseTSV = (rawText) => {
 
         // Update counts and status dynamically
         currentMovie.episodesCount = `${currentMovie.episodes.length} Tập`;
-        if (!currentMovie.episodeCurrent || currentMovie.episodeCurrent.startsWith('Tập ')) {
+        if (!explicitEpisodeCurrent) {
           currentMovie.episodesStatus = `Tập ${currentMovie.episodes.length}`;
           currentMovie.episodeCurrent = `Tập ${currentMovie.episodes.length}`;
         }

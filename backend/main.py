@@ -1459,9 +1459,9 @@ def convert_movie_data_to_tsv_rows(data: dict) -> List[str]:
         ep_url = ep.get('link_m3u8', '') or ep.get('link_embed', '')
 
         # Chuẩn hóa số tập (bỏ chữ hoặc số 0 thừa nếu có)
-        match = re.search(r'\d+', str(raw_ep_name))
+        match = re.fullmatch(r'(?:(?:tập|tap|episode|ep)\s*)*(\d+)', str(raw_ep_name).strip(), re.IGNORECASE)
         if match:
-            ep_num = str(int(match.group()))
+            ep_num = str(int(match.group(1)))
         else:
             ep_num = str(raw_ep_name)
 
@@ -1550,7 +1550,8 @@ async def crawl_movie_api(request: Optional[CrawlRequest] = None, url: Optional[
             "message": f"Cào thành công {len(successful_movies)}/{len(slugs_to_crawl)} bộ phim!",
             "crawled_count": len(successful_movies),
             "total_requested": len(slugs_to_crawl),
-            "tsv": final_tsv
+            "tsv": final_tsv,
+            "movies": successful_movies
         }
 
 

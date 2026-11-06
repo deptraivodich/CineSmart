@@ -1,0 +1,62 @@
+name: CineSmart Daily Japanese Anime
+on:
+  schedule:
+    # 18:30 UTC = 01:30 Vietnam (UTC+7), on the following calendar day.
+    # GitHub may delay scheduled runs; durable work resumes at the next invocation.
+    - cron: '30 18 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Read and simulate only; never write movies or job state'
+        type: boolean
+        default: true
+      start_page:
+        description: 'First page (1-10); resume an unfinished job using its original range'
+        type: number
+        default: 1
+      end_page:
+        description: 'Last page (1-10)'
+        type: number
+        default: 10
+
+permissions:
+  contents: read
+
+# Shared across branches and dispatch/schedule. Never cancel an active writer.
+concurrency:
+  group: cinesmart-firestore-anime-writer
+  cancel-in-progress: false
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      # Public project ID; must equal the deployed CineSmart project's ID.
+      FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID || 'loliphim-db' }}
+      # Off by default. A service account Secret alone never enables writes.
+      CRAWLER_WRITES_ENABLED: ${{ vars.CRAWLER_WRITES_ENABLED }}
+      CRAWLER_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      CRAWLER_DRY_RUN: ${{ vars.CRAWLER_WRITES_ENABLED != 'true' || github.ref != format('refs/heads/{0}', github.event.repository.default_branch) || (github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
+      CRAWLER_START_PAGE: ${{ inputs.start_page }}
+      CRAWLER_END_PAGE: ${{ inputs.end_page }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          check-latest: true
+          cache: npm
+      - run: npm ci
+      - name: Validate credentials before source requests
+        env:
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+        run: node --input-type=module -e "import { validateCredentials } from './scripts/lib/firestoreStore.mjs'; validateCredentials(); console.log('Firebase configuration valid (credentials hidden)');"
+      - name: Run safe regression tests
+        run: npm run test:crawler
+      - name: Sync Japanese animation metadata
+        env:
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+        run: npm run crawl:anime
