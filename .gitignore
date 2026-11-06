@@ -1,10 +1,41 @@
-node_modules
-node_modules
+# Dependencies and tool caches
+node_modules/
+.vite/
+.cache/
+.eslintcache
 vite.config.js.timestamp-*
 *.mjs.map
+
+# Local configuration and credentials
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
+serviceAccount*.json
+*service-account*.json
+*-firebase-adminsdk-*.json
+/credentials/
+/*.key
+/*.pem
+/backend/*.key
+/backend/*.pem
+
+# Runtime logs and generated test/build output
+*.log
+/logs/
+/coverage/
+/.nyc_output/
+/test-results/
+/playwright-report/
+/.build-anime-validation/
+/*.tmp
+
+# Local SQLite files; existing tracked databases are retained
+/backend/*.db
+/backend/*.db-wal
+/backend/*.db-shm
+/backend/*.db-journal
+
+# Python caches and editor backups
 __pycache__/
 *.py[cod]
 *.bak

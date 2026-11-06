@@ -17,7 +17,7 @@ export const formatVietnameseSentenceCase = (text) => {
   return trimmed.charAt(0).toUpperCase() + trimmed.slice(1).toLowerCase();
 };
 
-export { generateSlug } from './slugUtils';
+export { generateSlug } from './slugUtils.js';
 
 /**
  * Defensive Helper: Extracts clean episode number/string without repeated "Tập" prefixes
