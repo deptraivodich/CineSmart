@@ -1,5 +1,5 @@
 import React, { lazy, Suspense } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import LoadingScreen from '../components/common/LoadingScreen';
 import Navbar from '../components/common/Navbar';
@@ -34,6 +34,8 @@ const RequireAuth = ({ children }) => {
  */
 const ClientRouters = () => {
   const { currentUser, loading } = useAuth();
+  const { search } = useLocation();
+  const adminLogin = new URLSearchParams(search).get('admin') === '1';
 
   return (
     <>
@@ -45,7 +47,7 @@ const ClientRouters = () => {
           {/* Login is always accessible */}
           <Route path="/login" element={
             loading ? <LoadingScreen message="Đang xác thực..." /> :
-            currentUser ? <Navigate to="/" replace /> : <LoginPage />
+            currentUser && !adminLogin ? <Navigate to="/" replace /> : <LoginPage />
           } />
 
           {/* All other routes require authentication */}
