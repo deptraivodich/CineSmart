@@ -244,7 +244,7 @@ const MovieManagementPage = ({ readOnly = false }) => {
     try {
       const res = await syncAllLocalMoviesToCloud();
       if (res.success) {
-        showToast('success', `🎉 Đã đồng bộ thành công ${res.count} phim lên Cloud Firestore (loliphim-db)!`);
+        showToast('success', `Đã ghi ${res.count} phim lên Cloud. Bỏ qua ${res.skipped || 0} phim đã khớp hoặc có bản Cloud mới hơn.`);
         await fetchMoviesList();
       } else {
         showToast('info', res.message || 'Không có phim nào để đồng bộ.');
@@ -258,10 +258,10 @@ const MovieManagementPage = ({ readOnly = false }) => {
   };
 
   // Fetch Movies on Mount with Safe Try/Catch/Finally
-  const fetchMoviesList = async () => {
+  const fetchMoviesList = async ({ forceRefresh = false } = {}) => {
     setIsLoading(true);
     try {
-      const data = await getMovies();
+      const data = await getMovies({ forceRefresh });
       setMovies(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error("Lỗi khi tải danh sách phim:", err);
@@ -397,7 +397,7 @@ const MovieManagementPage = ({ readOnly = false }) => {
       showToast('success', `🎉 Thêm mới phim "${created.title}" với ${genreList.length} thể loại thành công!`);
     } catch (err) {
       console.error("Create movie error:", err);
-      showToast('error', 'Không thể tạo mới phim. Vui lòng thử lại!');
+      showToast('error', err.message || 'Không thể tạo mới phim. Vui lòng thử lại!');
     } finally {
       setIsSubmitting(false);
     }
@@ -438,7 +438,7 @@ const MovieManagementPage = ({ readOnly = false }) => {
       showToast('success', `Cập nhật phim "${updated.title}" thành công!`);
     } catch (err) {
       console.error("Update movie error:", err);
-      showToast('error', 'Không thể cập nhật phim!');
+      showToast('error', err.message || 'Không thể cập nhật phim!');
     } finally {
       setIsSubmitting(false);
     }
@@ -452,16 +452,16 @@ const MovieManagementPage = ({ readOnly = false }) => {
     const targetMovie = deletingMovie;
     const targetId = targetMovie.id;
 
-    // 1. Close Modal & Optimistically Update UI immediately
-    setDeletingMovie(null);
-    setMovies(prev => prev.filter(m => m.id !== targetId));
-    showToast('success', `🗑️ Đã xóa phim "${targetMovie.title || 'này'}" khỏi hệ thống!`);
-
-    // 2. Perform backend delete in background
+    setIsSubmitting(true);
     try {
       await deleteMovie(targetId);
+      setDeletingMovie(null);
+      setMovies(prev => prev.filter(movie => movie.id !== targetId));
+      showToast('success', `Đã xóa phim "${targetMovie.title}" trên Cloud.`);
     } catch (err) {
-      console.error("Background delete failed:", err);
+      showToast('error', err.message || 'Không thể xóa phim trên Cloud.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -620,7 +620,7 @@ const MovieManagementPage = ({ readOnly = false }) => {
 
                 <button 
                   type="button"
-                  onClick={fetchMoviesList}
+                  onClick={() => fetchMoviesList({ forceRefresh: true })}
                   className="p-2 rounded-xl bg-surface-card hover:bg-white/10 text-gray-300 border border-glass-border text-xs cursor-pointer"
                   title="Làm mới dữ liệu"
                 >
@@ -1306,7 +1306,7 @@ const MovieManagementPage = ({ readOnly = false }) => {
               <button 
                 type="button" 
                 onClick={handleConfirmDelete}
-                disabled={readOnly}
+                disabled={readOnly || isSubmitting}
                 className="px-6 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-black shadow-[0_0_20px_rgba(239,68,68,0.6)] cursor-pointer active:scale-95 transition-transform"
               >
                 🗑️ Xác Nhận Xóa

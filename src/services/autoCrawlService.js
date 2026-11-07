@@ -9,6 +9,7 @@
 
 import { getMovies, updateMovie, getStoredMovies, saveStoredMovies } from './movieService';
 import { generateSlug } from '../utils/slugUtils';
+import { runAdminAutoUpdateBatch } from './adminCrawler';
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_API_URL || 'http://localhost:8000';
 
@@ -42,6 +43,8 @@ export const runAutoUpdateBatch = async (batch) => {
   if (!Array.isArray(batch) || batch.length === 0) {
     return { status: 'skipped', reason: 'Empty batch', checkedCount: 0, updatedCount: 0, updatedMovies: [], checkedDetails: [] };
   }
+
+  if (import.meta.env.PROD) return runAdminAutoUpdateBatch(batch);
 
   try {
     const payloadMovies = batch.map(m => ({

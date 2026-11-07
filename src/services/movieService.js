@@ -2,15 +2,16 @@ import {
   collection, 
   getDocs, 
   getDoc,
+  getDocsFromServer,
   doc, 
   setDoc,
-  addDoc, 
   updateDoc, 
-  deleteDoc, 
-  writeBatch
+  runTransaction
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { deduplicateEpisodes } from '../utils/textUtils';
+import { getAdminIdToken } from './adminSession';
+import { prepareCloudSync, shouldSyncMovie, cloudSyncChunks } from '../utils/cloudMovieSync.js';
 
 const COLLECTION_NAME = 'movies';
 const SETTINGS_COLLECTION = 'settings';
@@ -19,6 +20,9 @@ const LAYOUT_DOC_ID = 'homepage_layout';
 // Standardized Storage Keys for 210LoliPhim
 const STORAGE_KEY = '210loliphim_movies_db';
 const LAYOUT_STORAGE_KEY = '210loliphim_homepage_layout';
+const CATALOG_CHECKED_AT_KEY = '210loliphim_movies_checked_at';
+let catalogRequest = null;
+let catalogGeneration = 0;
 
 // Default initial movies used ONLY on very first run if database is completely empty
 const DEFAULT_INITIAL_MOVIES = [
@@ -140,8 +144,10 @@ export const getStoredMovies = () => {
 };
 
 export const saveStoredMovies = (moviesList) => {
+  catalogGeneration++;
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(moviesList));
+    localStorage.removeItem(CATALOG_CHECKED_AT_KEY);
   } catch (e) {
     console.warn("Error saving local cache:", e);
   }
@@ -150,12 +156,15 @@ export const saveStoredMovies = (moviesList) => {
 /**
  * 1. READ ALL MOVIES: Fetch all movies directly from Cloud Firestore
  */
-export const getMovies = async () => {
+const fetchMoviesCatalog = async () => {
+  const generation = catalogGeneration;
   let movies = [];
+  let cloudRead = false;
   try {
     const querySnapshot = await withTimeout(getDocs(collection(db, COLLECTION_NAME)), 3500);
     
     if (querySnapshot && !querySnapshot.empty) {
+      cloudRead = true;
       movies = querySnapshot.docs.map(docSnap => ({
         id: docSnap.id,
         ...docSnap.data()
@@ -170,7 +179,7 @@ export const getMovies = async () => {
   }
 
   // Tự động gộp dữ liệu mới nhất (đạo diễn, tập hiện tại, số tập) từ Backend SQLite nếu có
-  try {
+  if (!import.meta.env.PROD) try {
     const backendRes = await withTimeout(fetch('http://localhost:8000/api/movies?limit=300'), 1500);
     if (backendRes.ok) {
       const backendJson = await backendRes.json();
@@ -218,8 +227,22 @@ export const getMovies = async () => {
     return timeB - timeA;
   });
 
+  if (generation !== catalogGeneration) return getStoredMovies();
   saveStoredMovies(movies);
+  if (cloudRead) {
+    try { localStorage.setItem(CATALOG_CHECKED_AT_KEY, String(Date.now())); } catch { /* Cache is optional. */ }
+  }
   return movies;
+};
+
+export const getMovies = async ({ forceRefresh = false } = {}) => {
+  let checkedAt = 0;
+  try { checkedAt = Number(localStorage.getItem(CATALOG_CHECKED_AT_KEY)); } catch { /* Fetch without cache. */ }
+  if (!forceRefresh && checkedAt > 0 && Date.now() - checkedAt < 60000) return getStoredMovies();
+  if (!catalogRequest) {
+    catalogRequest = fetchMoviesCatalog().finally(() => { catalogRequest = null; });
+  }
+  return catalogRequest;
 };
 
 /**
@@ -244,20 +267,16 @@ export const getMovieById = async (id) => {
  * 3. CREATE MOVIE: Add a new movie document to Cloud Firestore
  */
 export const addMovie = async (movieData) => {
+  await getAdminIdToken();
   const payload = sanitizeFirestoreData({
     ...movieData,
     createdAt: movieData.createdAt || new Date().toISOString(),
     status: movieData.status || 'Active'
   });
 
-  let newMovie = { id: `local_${Date.now()}`, ...payload };
-
-  try {
-    const docRef = await withTimeout(addDoc(collection(db, COLLECTION_NAME), payload), 3500);
-    newMovie = { id: docRef.id, ...payload };
-  } catch (e) {
-    console.warn("Firestore addDoc fallback to local ID:", e.message);
-  }
+  const docRef = doc(collection(db, COLLECTION_NAME));
+  await setDoc(docRef, payload);
+  const newMovie = { id: docRef.id, ...payload };
 
   const currentList = getStoredMovies();
   const updatedList = [newMovie, ...currentList.filter(m => m.id !== newMovie.id)];
@@ -270,23 +289,24 @@ export const addMovie = async (movieData) => {
  */
 export const updateMovie = async (id, updateData) => {
   if (!id) throw new Error("Missing movie ID for update");
+  await getAdminIdToken();
 
   const cleanedEpisodes = deduplicateEpisodes(updateData.episodes || []);
   const payload = sanitizeFirestoreData({
     ...updateData,
-    episodes: cleanedEpisodes,
-    episodesCount: cleanedEpisodes.length > 0 ? `${cleanedEpisodes.length} Tập` : (updateData.episodesCount || '1 Tập'),
+    ...(updateData.episodes === undefined ? {} : {
+      episodes: cleanedEpisodes,
+      episodesCount: cleanedEpisodes.length > 0 ? `${cleanedEpisodes.length} Tập` : (updateData.episodesCount || '1 Tập'),
+    }),
     updatedAt: new Date().toISOString()
   });
 
   // 1. Update Firestore if valid cloud ID
   if (!id.startsWith('mock_') && !id.startsWith('local_')) {
-    try {
-      const docRef = doc(db, COLLECTION_NAME, id);
-      await withTimeout(updateDoc(docRef, payload), 3500);
-    } catch (e) {
-      console.warn("Firestore updateDoc fallback:", e.message);
-    }
+    const docRef = doc(db, COLLECTION_NAME, id);
+    await updateDoc(docRef, payload);
+  } else {
+    throw new Error('Hãy đồng bộ phim cục bộ lên Cloud trước khi chỉnh sửa.');
   }
 
   // 2. Update local storage cache
@@ -295,7 +315,7 @@ export const updateMovie = async (id, updateData) => {
   saveStoredMovies(updatedList);
 
   // 3. Immediately sync updated movie to backend SQLite so SQLite is in sync with Firestore
-  try {
+  if (!import.meta.env.PROD) try {
     fetch('http://localhost:8000/api/movies/sync', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -313,15 +333,12 @@ export const updateMovie = async (id, updateData) => {
  */
 export const deleteMovie = async (id) => {
   if (!id) return false;
+  await getAdminIdToken();
 
-  // 1. Remove from local cache
-  const currentList = getStoredMovies();
-  const updatedList = currentList.filter(m => m && String(m.id) !== String(id));
-  saveStoredMovies(updatedList);
-
-  // 2. Clean ghost IDs from homepage layout
-  try {
-    const layout = await getHomepageLayout();
+  await runTransaction(db, async transaction => {
+    const layoutRef = doc(db, SETTINGS_COLLECTION, LAYOUT_DOC_ID);
+    const layoutSnapshot = await transaction.get(layoutRef);
+    const layout = layoutSnapshot.exists() ? layoutSnapshot.data() : null;
     if (layout) {
       const cleanLayout = {
         top10Movies: (layout.top10Movies || []).filter(mId => String(mId) !== String(id)),
@@ -334,21 +351,15 @@ export const deleteMovie = async (id) => {
         comingSoon: (layout.comingSoon || []).filter(mId => String(mId) !== String(id)),
         animeVault: (layout.animeVault || []).filter(mId => String(mId) !== String(id)),
       };
-      await saveHomepageLayout(cleanLayout);
+      transaction.set(layoutRef, cleanLayout, { merge: true });
     }
-  } catch (e) {
-    console.warn("Could not clean ghost IDs from layout:", e.message);
-  }
+    if (!id.startsWith('mock_') && !id.startsWith('local_')) {
+      transaction.delete(doc(db, COLLECTION_NAME, id));
+    }
+  });
 
-  // 3. Delete from Firestore
-  if (!id.startsWith('mock_') && !id.startsWith('local_') && !id.startsWith('imported_')) {
-    try {
-      const docRef = doc(db, COLLECTION_NAME, id);
-      await withTimeout(deleteDoc(docRef), 3000);
-    } catch (e) {
-      console.warn("Firestore deleteDoc fallback:", e.message);
-    }
-  }
+  const currentList = getStoredMovies();
+  saveStoredMovies(currentList.filter(movie => movie && String(movie.id) !== String(id)));
 
   return true;
 };
@@ -384,14 +395,11 @@ export const getHomepageLayout = async () => {
  * 7. HOMEPAGE LAYOUT CMS: Save settings/homepage_layout to Firestore
  */
 export const saveHomepageLayout = async (layoutData) => {
+  await getAdminIdToken();
   const cleanPayload = sanitizeFirestoreData(layoutData);
 
-  try {
-    const docRef = doc(db, SETTINGS_COLLECTION, LAYOUT_DOC_ID);
-    await withTimeout(setDoc(docRef, cleanPayload, { merge: true }), 3500);
-  } catch (e) {
-    console.warn("Firestore saveHomepageLayout fallback:", e.message);
-  }
+  const docRef = doc(db, SETTINGS_COLLECTION, LAYOUT_DOC_ID);
+  await setDoc(docRef, cleanPayload, { merge: true });
 
   // Save to local cache
   try {
@@ -417,46 +425,54 @@ export const saveBulkMoviesLocally = (newMoviesArray) => {
  * 9. SYNC ALL MOVIES TO CLOUD: Push all current movies in local cache up to Cloud Firestore
  */
 export const syncAllLocalMoviesToCloud = async () => {
+  await getAdminIdToken();
   const localList = getStoredMovies();
   if (!Array.isArray(localList) || localList.length === 0) {
     return { success: false, count: 0, message: "Không có phim nào trong bộ nhớ cục bộ để đồng bộ." };
   }
 
-  // Deduplicate all movies' episodes
-  const sanitizedList = localList.map(movie => {
+  const cloudSnapshot = localList.some(movie => String(movie?.id).startsWith('local_'))
+    ? await getDocsFromServer(collection(db, COLLECTION_NAME)) : null;
+  const cloudCatalog = cloudSnapshot ? cloudSnapshot.docs.map(snapshot => ({ ...snapshot.data(), id: snapshot.id })) : [];
+  const records = prepareCloudSync(localList, cloudCatalog).map(record => {
+    const movie = record.data;
     const dedupedEps = deduplicateEpisodes(movie.episodes || []);
     return {
-      ...movie,
-      episodes: dedupedEps,
-      episodesCount: dedupedEps.length > 0 ? `${dedupedEps.length} Tập` : (movie.episodesCount || '1 Tập')
+      ...record,
+      data: sanitizeFirestoreData({
+        ...movie,
+        episodes: dedupedEps,
+        episodesCount: dedupedEps.length > 0 ? `${dedupedEps.length} Tập` : (movie.episodesCount || '1 Tập'),
+      }),
     };
   });
 
-  // 1. Sync to SQLite backend so backend and cloud are 100% in sync
-  try {
-    await fetch('http://localhost:8000/api/movies/sync', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ movies: sanitizedList })
-    }).catch(() => {});
-  } catch (e) {
-    console.warn("Sync to backend sqlite warning:", e);
-  }
-
-  // 2. Sync to Cloud Firestore
-  const batch = writeBatch(db);
-  sanitizedList.forEach(movie => {
-    const { id, ...data } = movie;
-    const docId = id && !id.startsWith('local_') && !id.startsWith('mock_') ? id : undefined;
-    const docRef = docId ? doc(db, COLLECTION_NAME, docId) : doc(collection(db, COLLECTION_NAME));
-    const cleanData = sanitizeFirestoreData({
-      ...data,
-      createdAt: data.createdAt || new Date().toISOString()
+  let count = 0;
+  let skipped = 0;
+  // Each transaction rechecks current cloud data and stays below write limits.
+  for (const chunk of cloudSyncChunks(records)) {
+    await getAdminIdToken();
+    const result = await runTransaction(db, async transaction => {
+      const refs = chunk.map(record => doc(db, COLLECTION_NAME, record.id));
+      const snapshots = await Promise.all(refs.map(ref => transaction.get(ref)));
+      let written = 0;
+      snapshots.forEach((snapshot, index) => {
+        const existing = snapshot.exists() ? snapshot.data() : null;
+        const data = { ...chunk[index].data };
+        data.createdAt ||= existing?.createdAt || new Date().toISOString();
+        if (shouldSyncMovie(existing, data)) {
+          transaction.set(refs[index], data, { merge: true });
+          written++;
+        }
+      });
+      return written;
     });
-    batch.set(docRef, cleanData, { merge: true });
-  });
-
-  await withTimeout(batch.commit(), 6000);
-  saveStoredMovies(sanitizedList);
-  return { success: true, count: sanitizedList.length };
+    count += result;
+    skipped += chunk.length - result;
+    const migratedIds = new Map(chunk.filter(record => record.originalId !== record.id).map(record => [record.originalId, record.id]));
+    if (result || migratedIds.size) {
+      saveStoredMovies(getStoredMovies().map(movie => migratedIds.has(movie.id) ? { ...movie, id: migratedIds.get(movie.id) } : movie));
+    }
+  }
+  return { success: true, count, skipped };
 };

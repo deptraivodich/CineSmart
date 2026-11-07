@@ -8,6 +8,7 @@ import { getMovies } from '../../services/movieService';
 import { getAdminStats } from '../../services/interactionService';
 
 const AdminDashboard = ({ readOnly = false }) => {
+  const statsUnavailable = readOnly || import.meta.env.PROD;
   const { currentUser, logout } = useAuth();
   const [isTrollModalOpen, setIsTrollModalOpen] = useState(false);
   const navigate = useNavigate();
@@ -22,7 +23,7 @@ const AdminDashboard = ({ readOnly = false }) => {
       // 1. Lấy danh sách phim thực tế từ Firebase / Local Cache
       const moviesList = await getMovies();
       const currentMovieCount = Array.isArray(moviesList) ? moviesList.length : 0;
-      if (readOnly) {
+      if (statsUnavailable) {
         setStats({ total_movies: currentMovieCount, today_views: null });
         return;
       }
@@ -47,7 +48,7 @@ const AdminDashboard = ({ readOnly = false }) => {
     } finally {
       setIsLoadingStats(false);
     }
-  }, [readOnly]);
+  }, [statsUnavailable]);
 
   useEffect(() => {
     loadRealStats();
@@ -143,8 +144,8 @@ const AdminDashboard = ({ readOnly = false }) => {
           {/* Ô 2: Luồng KKPhim Active */}
           <div className="p-5 glass-panel rounded-xl border-l-4 border-neon-cyan space-y-1">
             <p className="text-xs text-gray-400 font-semibold uppercase">Luồng KKPhim Active</p>
-            <p className="text-2xl font-black text-white">{readOnly ? '—' : '98.5%'}</p>
-            <span className="text-[11px] text-emerald-400 block pt-1">{readOnly ? 'Chưa kiểm tra luồng phát' : 'Hoạt động bình thường'}</span>
+            <p className="text-2xl font-black text-white">{statsUnavailable ? '—' : '98.5%'}</p>
+            <span className="text-[11px] text-emerald-400 block pt-1">{statsUnavailable ? 'Chưa kiểm tra luồng phát' : 'Hoạt động bình thường'}</span>
           </div>
 
           {/* Ô 3: Lượt Xem Hôm Nay (Dữ liệu thật theo ngày hôm nay từ view_logs / logs) */}
@@ -157,14 +158,14 @@ const AdminDashboard = ({ readOnly = false }) => {
                 stats.today_views?.toLocaleString() ?? '—'
               )}
             </p>
-            <span className="text-[11px] text-amber-400 block pt-1">{readOnly ? 'Backend thống kê chưa được triển khai' : 'Lượt xem thực tế hôm nay'}</span>
+            <span className="text-[11px] text-amber-400 block pt-1">{statsUnavailable ? 'Backend thống kê chưa được triển khai' : 'Lượt xem thực tế hôm nay'}</span>
           </div>
 
           {/* Ô 4: Trạng Thái Firestore */}
           <div className="p-5 glass-panel rounded-xl border-l-4 border-emerald-500 space-y-1">
             <p className="text-xs text-gray-400 font-semibold uppercase">Trạng Thái Firestore</p>
-            <p className="text-2xl font-black text-emerald-400">{readOnly ? 'Chỉ đọc' : 'Connected'}</p>
-            <span className="text-[11px] text-gray-400 block pt-1">{readOnly ? 'Thao tác ghi đã khóa' : 'Batch write sẵn sàng'}</span>
+            <p className="text-2xl font-black text-emerald-400">{readOnly ? 'Chỉ đọc' : 'Admin'}</p>
+            <span className="text-[11px] text-gray-400 block pt-1">{readOnly ? 'Thao tác ghi đã khóa' : 'Ghi bằng tài khoản Firebase đã xác thực'}</span>
           </div>
         </div>
 
