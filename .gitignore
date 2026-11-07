@@ -39,3 +39,6 @@ serviceAccount*.json
 __pycache__/
 *.py[cod]
 *.bak
+
+# Local Vercel project configuration
+.vercel/
