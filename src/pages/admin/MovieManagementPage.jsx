@@ -177,7 +177,7 @@ const GenreMultiSelect = ({ selectedGenres = [], onChange, label = "Danh Mục C
  * Phase 4: Full-CRUD Movie Management System (Admin Panel) + Homepage Layout CMS Tab
  * Updated with Defensive Programming to guarantee zero component crashes
  */
-const MovieManagementPage = () => {
+const MovieManagementPage = ({ readOnly = false }) => {
   // Navigation Tabs: 'list' | 'create' | 'magic' | 'homepage'
   const [activeTab, setActiveTab] = useState('list');
 
@@ -233,11 +233,13 @@ const MovieManagementPage = () => {
 
   // Manual Trigger: Open AutoSyncModal
   const handleManualAutoCrawl = () => {
+    if (readOnly) return;
     setIsAutoSyncModalOpen(true);
   };
 
   // Sync all local movies to Cloud Firestore
   const handleSyncToCloud = async () => {
+    if (readOnly) return;
     setIsSyncing(true);
     try {
       const res = await syncAllLocalMoviesToCloud();
@@ -364,6 +366,7 @@ const MovieManagementPage = () => {
   // CREATE: Single Movie Submit (Supporting Multi-select Categories)
   const handleCreateMovie = async (e) => {
     e.preventDefault();
+    if (readOnly) return;
     if (!formData.title || !formData.m3u8Url) {
       showToast('error', 'Vui lòng điền đủ Tên Phim và Link M3U8 Stream!');
       return;
@@ -403,6 +406,7 @@ const MovieManagementPage = () => {
   // UPDATE: Submit Edit Modal Form (Dynamic Episodes Support)
   const handleUpdateMovieSubmit = async (e) => {
     e.preventDefault();
+    if (readOnly) return;
     if (!editingMovie) return;
 
     const genreList = getGenresArray(editingMovie);
@@ -442,6 +446,7 @@ const MovieManagementPage = () => {
 
   // DELETE: Instant Optimistic Confirm Delete Action
   const handleConfirmDelete = async () => {
+    if (readOnly) return;
     if (!deletingMovie) return;
 
     const targetMovie = deletingMovie;
@@ -550,7 +555,8 @@ const MovieManagementPage = () => {
             </button>
             <button 
               type="button"
-              onClick={() => setIsAutoSyncModalOpen(true)}
+              onClick={handleManualAutoCrawl}
+              disabled={readOnly}
               className="px-3.5 py-2 rounded-lg text-xs font-black bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white shadow-lg flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
               title="Kích hoạt bảng điều khiển Cào Phim Tự Động & Live Sync Log"
             >
@@ -559,7 +565,7 @@ const MovieManagementPage = () => {
             <button 
               type="button"
               onClick={handleSyncToCloud}
-              disabled={isSyncing}
+              disabled={readOnly || isSyncing}
               className="px-3.5 py-2 rounded-lg text-xs font-black bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white shadow-lg flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
               title="Đẩy toàn bộ danh sách phim hiện có lên cơ sở dữ liệu đám mây Cloud Firestore"
             >
@@ -751,6 +757,7 @@ const MovieManagementPage = () => {
                                 <button 
                                   type="button"
                                   onClick={() => setDeletingMovie(movie)}
+                                  disabled={readOnly}
                                   className="p-2 rounded-lg bg-red-500/20 hover:bg-red-500/40 text-red-400 border border-red-500/50 transition-all font-bold cursor-pointer"
                                   title="Xóa Phim"
                                 >
@@ -799,7 +806,7 @@ const MovieManagementPage = () => {
 
         {/* TAB HOMEPAGE CMS */}
         {activeTab === 'homepage' && (
-          <HomepageCMS />
+          <HomepageCMS readOnly={readOnly} />
         )}
 
         {/* TAB 2: CREATE - SINGLE MOVIE FORM (Interactive Multi-Select Genre System) */}
@@ -810,6 +817,7 @@ const MovieManagementPage = () => {
             </h2>
 
             <form onSubmit={handleCreateMovie} className="space-y-5">
+              <fieldset disabled={readOnly} className="space-y-5">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="text-xs font-semibold text-gray-300">Tên Phim (Tiếng Việt) *</label>
@@ -947,18 +955,19 @@ const MovieManagementPage = () => {
 
               <button 
                 type="submit"
-                disabled={isSubmitting}
+                disabled={readOnly || isSubmitting}
                 className="w-full py-3.5 rounded-xl bg-neon-cyan/20 hover:bg-neon-cyan/30 text-neon-cyan border border-neon-cyan/40 font-bold text-xs transition-all shadow-[0_0_20px_rgba(0,240,255,0.3)] disabled:opacity-50 cursor-pointer"
               >
                 {isSubmitting ? 'Đang lưu phim...' : '🔥 Lưu Phim Mới Vào Hệ Thống'}
               </button>
+              </fieldset>
             </form>
           </div>
         )}
 
         {/* TAB 3: MAGIC IMPORT BULK TSV */}
         {activeTab === 'magic' && (
-          <MagicImport />
+          <MagicImport readOnly={readOnly} />
         )}
 
       </main>
@@ -968,11 +977,12 @@ const MovieManagementPage = () => {
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-surface-card border border-glass-border p-6 rounded-2xl max-w-2xl w-full space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto custom-scrollbar">
             <div className="flex items-center justify-between border-b border-glass-border pb-3">
-              <h3 className="text-lg font-bold text-white">✏️ Chỉnh Sửa Phim: {editingMovie?.title || 'Phim'}</h3>
+              <h3 className="text-lg font-bold text-white">{readOnly ? 'Xem Biểu Mẫu Phim' : '✏️ Chỉnh Sửa Phim'} — {editingMovie?.title || 'Phim'}</h3>
               <button type="button" onClick={() => setEditingMovie(null)} className="text-gray-400 hover:text-white cursor-pointer">✕</button>
             </div>
 
             <form onSubmit={handleUpdateMovieSubmit} className="space-y-4 text-xs">
+              <fieldset disabled={readOnly} className="space-y-4">
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-gray-300">Tên phim</label>
@@ -1252,6 +1262,7 @@ const MovieManagementPage = () => {
                 label="Danh Mục Chính & Thể Loại (Chọn nhiều mục)"
               />
 
+              </fieldset>
               <div className="flex items-center justify-end space-x-3 pt-3">
                 <button 
                   type="button" 
@@ -1262,7 +1273,7 @@ const MovieManagementPage = () => {
                 </button>
                 <button 
                   type="submit"
-                  disabled={isSubmitting}
+                  disabled={readOnly || isSubmitting}
                   className="px-6 py-2 rounded-xl bg-neon-cyan/20 text-neon-cyan border border-neon-cyan/40 font-bold cursor-pointer"
                 >
                   Lưu Thay Đổi
@@ -1295,6 +1306,7 @@ const MovieManagementPage = () => {
               <button 
                 type="button" 
                 onClick={handleConfirmDelete}
+                disabled={readOnly}
                 className="px-6 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-black shadow-[0_0_20px_rgba(239,68,68,0.6)] cursor-pointer active:scale-95 transition-transform"
               >
                 🗑️ Xác Nhận Xóa
@@ -1355,7 +1367,7 @@ const MovieManagementPage = () => {
 
       {/* AUTO-SYNC MODAL WITH LIVE LOG */}
       <AutoSyncModal
-        isOpen={isAutoSyncModalOpen}
+        isOpen={!readOnly && isAutoSyncModalOpen}
         onClose={() => {
           setIsAutoSyncModalOpen(false);
           fetchMoviesList();

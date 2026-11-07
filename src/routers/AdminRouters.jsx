@@ -6,32 +6,32 @@ import LoadingScreen from '../components/common/LoadingScreen';
 // Code Splitting Admin Pages with React.lazy
 const AdminDashboard = lazy(() => import('../pages/admin/AdminDashboard'));
 const MovieManagementPage = lazy(() => import('../pages/admin/MovieManagementPage'));
+const ADMIN_READ_ONLY = import.meta.env.VITE_ADMIN_READ_ONLY === 'true';
 
 /**
  * Protected Admin Route Wrapper
  */
 const AdminProtectedRoute = ({ children }) => {
-  const { userRole, loading } = useAuth();
+  const { currentUser, userRole, loading } = useAuth();
 
   if (loading) {
     return <LoadingScreen message="Đang nạp dữ liệu Admin..." />;
   }
 
-  if (import.meta.env.VITE_ADMIN_READ_ONLY === 'true') {
-    return (
-      <main className="min-h-screen flex items-center justify-center px-6 bg-slate-950 text-white">
-        <div className="max-w-lg space-y-4 text-center">
-          <h1 className="text-2xl font-bold">Quản trị đang được bảo trì</h1>
-          <p>Chức năng quản lý dữ liệu tạm thời bị khóa. Bạn vẫn có thể xem danh sách và thông tin phim.</p>
-          <Link className="inline-block text-cyan-300 underline" to="/">Về trang chủ</Link>
-        </div>
-      </main>
-    );
+  if (!currentUser || (!ADMIN_READ_ONLY && userRole !== 'admin')) {
+    return <Navigate to="/login" replace />;
   }
 
-  // Not admin → redirect to login im  mediately
-  if (userRole !== 'admin') {
-    return <Navigate to="/login" replace />;
+  if (ADMIN_READ_ONLY) {
+    return (
+      <>
+        <div role="status" className="bg-amber-950 text-amber-100 px-6 py-3 text-sm">
+          <strong>Admin đang ở chế độ xem.</strong> Bạn có thể kiểm tra giao diện và dữ liệu. Các thao tác lưu, xóa và đồng bộ đã khóa.
+          <Link className="ml-3 text-cyan-300 underline" to="/">Về trang chủ</Link>
+        </div>
+        {children}
+      </>
+    );
   }
   
   return children;
@@ -48,7 +48,7 @@ const AdminRouters = () => {
           path="/" 
           element={
             <AdminProtectedRoute>
-              <AdminDashboard />
+              <AdminDashboard readOnly={ADMIN_READ_ONLY} />
             </AdminProtectedRoute>
           } 
         />
@@ -56,7 +56,7 @@ const AdminRouters = () => {
           path="/movies" 
           element={
             <AdminProtectedRoute>
-              <MovieManagementPage />
+              <MovieManagementPage readOnly={ADMIN_READ_ONLY} />
             </AdminProtectedRoute>
           } 
         />
