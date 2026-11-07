@@ -7,7 +7,7 @@ import { runAutoUpdate } from './services/autoCrawlService';
 
 function AppContent() {
   const location = useLocation();
-  const { isVerifiedAdmin } = useAuth();
+  const { isVerifiedAdmin, currentUser, loading } = useAuth();
   const isAdmin = location.pathname.includes('/admin');
   const timerRef = useRef(null);
   const intervalRef = useRef(null);
@@ -86,7 +86,9 @@ function AppContent() {
     <>
       <AppRouter />
       {/* Nhiệm vụ 4: Ẩn Chatbot CineSmart AI ở trang Admin, chỉ hiển thị ở màn hình Client */}
-      {!isAdmin && <CineSmartAIBot />}
+      {!loading && currentUser && !isAdmin && location.pathname !== '/login' && (
+        <CineSmartAIBot key={currentUser.uid || currentUser.username} />
+      )}
     </>
   );
 }

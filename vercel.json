@@ -5,7 +5,8 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "functions": {
-    "api/admin/crawl.js": { "maxDuration": 300 }
+    "api/admin/crawl.js": { "maxDuration": 300 },
+    "api/chat.js": { "maxDuration": 60 }
   },
   "rewrites": [
     {

@@ -117,15 +117,15 @@ const Navbar = () => {
     <>
       {/* Main Top Bar Header - Always Solid Navy & Highly Visible */}
       <header className="fixed top-0 left-0 right-0 z-[9999] bg-[#161a2e]/95 backdrop-blur-md border-b border-white/10 shadow-2xl py-2.5 transition-all">
-        <div className="max-w-7xl mx-auto px-3 sm:px-6 md:px-8 flex items-center justify-between gap-3">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 md:px-8 flex items-center justify-between gap-2 md:gap-3">
 
           {/* Left Section: Menu Hamburger & Brand Logo with Slogan */}
-          <div className="flex items-center space-x-3 sm:space-x-4 flex-shrink-0">
+          <div className="flex min-w-0 items-center space-x-2 sm:space-x-4 flex-shrink-0">
 
             {/* Hamburger Button */}
             <button
               onClick={() => setMenuOpen(!menuOpen)}
-              className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-all cursor-pointer flex flex-col justify-center items-center gap-1 w-9 h-9 border border-white/10"
+              className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-all cursor-pointer flex flex-col justify-center items-center gap-1 w-11 h-11 shrink-0 border border-white/10"
               aria-label="Mở danh mục thể loại"
               title="Danh mục thể loại"
             >
@@ -135,20 +135,20 @@ const Navbar = () => {
             </button>
 
             {/* Brand Logo with Dragon Icon & Slogan */}
-            <Link to="/" className="flex items-center space-x-2.5 group">
-              <div className="relative">
+            <Link to="/" className="flex min-w-0 items-center space-x-1.5 sm:space-x-2.5 group">
+              <div className="relative hidden min-[360px]:block">
                 <img
                   src={dragonLogo}
                   alt="Dragon Logo"
-                  className="w-10 h-10 object-contain drop-shadow-[0_0_12px_rgba(255,255,255,0.95)] group-hover:scale-110 transition-transform duration-300"
+                  className="w-8 h-8 sm:w-10 sm:h-10 object-contain drop-shadow-[0_0_12px_rgba(255,255,255,0.95)] group-hover:scale-110 transition-transform duration-300"
                 />
               </div>
               <div className="flex flex-col">
-                <div className="flex items-center text-xl sm:text-2xl font-black tracking-tight leading-none">
+                <div className="flex items-center text-lg sm:text-2xl font-black tracking-tight leading-none">
                   <span className="text-amber-400">210</span>
                   <span className="text-[#38bdf8]">LoliPhim</span>
                 </div>
-                <span className="text-[9px] font-bold text-amber-300 tracking-tight mt-0.5 whitespace-nowrap">
+                <span className="hidden sm:block text-[9px] font-bold text-amber-300 tracking-tight mt-0.5 whitespace-nowrap">
                   -\ Tích cực quay tay – Vận may sẽ đến /-
                 </span>
               </div>
@@ -156,7 +156,7 @@ const Navbar = () => {
           </div>
 
           {/* Middle Section: Search Bar Container (Always Visible & Responsive) */}
-          <div className="flex-1 max-w-xl mx-2 min-w-0">
+          <div className="hidden md:block flex-1 max-w-xl mx-2 min-w-0">
             <form onSubmit={handleSearchSubmit} className="relative w-full">
               <div className="relative flex items-center">
                 <svg className="w-4 h-4 text-gray-400 absolute left-3 pointer-events-none flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -175,12 +175,22 @@ const Navbar = () => {
 
           {/* Right Section: Buttons (Thể Loại & Thành Viên / Admin) */}
           <div className="flex items-center space-x-2 sm:space-x-3 flex-shrink-0">
+            <button
+              type="button"
+              onClick={() => setMenuOpen(true)}
+              aria-label="Tìm phim"
+              className="md:hidden w-11 h-11 rounded-full bg-[#283056] border border-white/15 flex items-center justify-center"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+            </button>
 
             {/* 1. Button Thể Loại */}
             <button
               type="button"
               onClick={() => setMenuOpen(!menuOpen)}
-              className="px-3 sm:px-3.5 py-1.5 rounded-full bg-[#283056] hover:bg-[#323c6d] text-white text-xs font-bold border border-white/15 transition-all flex items-center space-x-1.5 cursor-pointer shadow-sm"
+              className="hidden md:flex px-3 sm:px-3.5 py-1.5 rounded-full bg-[#283056] hover:bg-[#323c6d] text-white text-xs font-bold border border-white/15 transition-all items-center space-x-1.5 cursor-pointer shadow-sm"
             >
               <span>🎭</span>
               <span className="hidden xs:inline">Thể Loại</span>
@@ -195,7 +205,7 @@ const Navbar = () => {
             {userRole === 'admin' && (
               <Link
                 to="/admin"
-                className="px-3 py-1.5 rounded-full bg-neon-red/90 hover:bg-neon-red text-white text-xs font-black shadow-neon-red transition-all flex items-center gap-1"
+                className="hidden md:flex px-3 py-1.5 rounded-full bg-neon-red/90 hover:bg-neon-red text-white text-xs font-black shadow-neon-red transition-all items-center gap-1"
                 title="Vào Trang Quản Trị Admin"
               >
                 <span>👑</span>
@@ -208,10 +218,11 @@ const Navbar = () => {
               <div className="flex items-center space-x-1.5 sm:space-x-2">
                 <Link
                   to="/admin"
-                  className="px-3 sm:px-4 py-1.5 rounded-full bg-[#ffce45] hover:bg-amber-300 text-gray-900 font-extrabold text-xs transition-all shadow-md flex items-center space-x-1"
+                  aria-label={`Tài khoản ${currentUser.displayName || currentUser.username || 'User'}`}
+                  className="w-11 h-11 sm:w-auto sm:h-auto sm:px-4 sm:py-1.5 rounded-full bg-[#ffce45] hover:bg-amber-300 text-gray-900 font-extrabold text-xs transition-all shadow-md flex items-center justify-center space-x-1"
                 >
                   <span>👤</span>
-                  <span className="max-w-[70px] sm:max-w-[90px] truncate">{currentUser.displayName || currentUser.username || 'User'}</span>
+                  <span className="hidden sm:inline max-w-[90px] truncate">{currentUser.displayName || currentUser.username || 'User'}</span>
                 </Link>
                 <button
                   onClick={() => setIsTrollModalOpen(true)}
@@ -242,7 +253,7 @@ const Navbar = () => {
           {/* Slate Indigo Card Container */}
           <div
             onClick={(e) => e.stopPropagation()}
-            className="relative w-full max-w-sm bg-[#323c6d] border border-white/15 rounded-2xl p-5 text-white space-y-4 shadow-2xl max-h-[85vh] overflow-y-auto custom-scrollbar flex flex-col justify-between cursor-default animate-scaleUp"
+            className="relative w-full max-w-sm bg-[#323c6d] border border-white/15 rounded-2xl p-5 text-white space-y-4 shadow-2xl max-h-[calc(100dvh-7rem)] overflow-y-auto custom-scrollbar flex flex-col justify-between cursor-default animate-scaleUp"
           >
             {/* Dedicated Top Row: Header & Red Close X Button (Separated from User Pill Button) */}
             <div className="flex items-center justify-between pb-1">
@@ -261,6 +272,17 @@ const Navbar = () => {
             </div>
 
             <div className="space-y-4">
+              <form onSubmit={handleSearchSubmit} className="md:hidden">
+                <input
+                  type="search"
+                  aria-label="Tìm phim trong danh mục"
+                  placeholder="Tìm phim, thể loại..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full min-h-11 px-4 text-base rounded-xl bg-[#202644] border border-white/10 text-white placeholder-gray-400 focus:outline-none focus:border-amber-400"
+                />
+                <button type="submit" className="mt-2 w-full min-h-11 rounded-xl bg-amber-400 text-black font-bold">Tìm kiếm</button>
+              </form>
               {/* 1. Pill Button: Thành viên */}
               <Link
                 to={currentUser ? "#" : "/login"}
@@ -338,17 +360,6 @@ const Navbar = () => {
                   </span>
                 )}
               </button>
-
-              {/* Mobile Search input inside drawer */}
-              <form onSubmit={handleSearchSubmit} className="sm:hidden">
-                <input
-                  type="text"
-                  placeholder="Tìm phim, thể loại..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full py-2 pl-4 pr-4 text-xs rounded-xl bg-[#202644] border border-white/10 text-white placeholder-gray-400 focus:outline-none focus:border-amber-400"
-                />
-              </form>
 
               {currentUser && (
                 <div className="text-center pt-1 space-y-3">
