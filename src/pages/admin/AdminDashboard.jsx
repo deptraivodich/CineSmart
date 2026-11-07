@@ -7,7 +7,7 @@ import dragonLogo from '../../assets/dragon-logo.png';
 import { getMovies } from '../../services/movieService';
 import { getAdminStats } from '../../services/interactionService';
 
-const AdminDashboard = () => {
+const AdminDashboard = ({ readOnly = false }) => {
   const { currentUser, logout } = useAuth();
   const [isTrollModalOpen, setIsTrollModalOpen] = useState(false);
   const navigate = useNavigate();
@@ -22,6 +22,10 @@ const AdminDashboard = () => {
       // 1. Lấy danh sách phim thực tế từ Firebase / Local Cache
       const moviesList = await getMovies();
       const currentMovieCount = Array.isArray(moviesList) ? moviesList.length : 0;
+      if (readOnly) {
+        setStats({ total_movies: currentMovieCount, today_views: null });
+        return;
+      }
 
       // 2. Gọi API Backend để lấy thống kê chuẩn xác (Tổng phim và Lượt xem hôm nay)
       const data = await getAdminStats(currentMovieCount);
@@ -43,7 +47,7 @@ const AdminDashboard = () => {
     } finally {
       setIsLoadingStats(false);
     }
-  }, []);
+  }, [readOnly]);
 
   useEffect(() => {
     loadRealStats();
@@ -116,7 +120,7 @@ const AdminDashboard = () => {
               to="/admin/movies" 
               className="px-5 py-2.5 rounded-xl bg-neon-red hover:bg-red-600 text-white font-extrabold text-xs shadow-neon-red transition-all flex items-center gap-2"
             >
-              <span>🎬 Quản Lý Danh Sách Phim (Full-CRUD)</span>
+              <span>{readOnly ? '🎬 Xem Danh Sách Phim' : '🎬 Quản Lý Danh Sách Phim (Full-CRUD)'}</span>
             </Link>
           </div>
         </div>
@@ -139,8 +143,8 @@ const AdminDashboard = () => {
           {/* Ô 2: Luồng KKPhim Active */}
           <div className="p-5 glass-panel rounded-xl border-l-4 border-neon-cyan space-y-1">
             <p className="text-xs text-gray-400 font-semibold uppercase">Luồng KKPhim Active</p>
-            <p className="text-2xl font-black text-white">98.5%</p>
-            <span className="text-[11px] text-emerald-400 block pt-1">Hoạt động bình thường</span>
+            <p className="text-2xl font-black text-white">{readOnly ? '—' : '98.5%'}</p>
+            <span className="text-[11px] text-emerald-400 block pt-1">{readOnly ? 'Chưa kiểm tra luồng phát' : 'Hoạt động bình thường'}</span>
           </div>
 
           {/* Ô 3: Lượt Xem Hôm Nay (Dữ liệu thật theo ngày hôm nay từ view_logs / logs) */}
@@ -150,23 +154,23 @@ const AdminDashboard = () => {
               {isLoadingStats ? (
                 <span className="text-gray-500 animate-pulse text-lg">Đang tải...</span>
               ) : (
-                stats.today_views.toLocaleString()
+                stats.today_views?.toLocaleString() ?? '—'
               )}
             </p>
-            <span className="text-[11px] text-amber-400 block pt-1">Lượt xem thực tế hôm nay</span>
+            <span className="text-[11px] text-amber-400 block pt-1">{readOnly ? 'Backend thống kê chưa được triển khai' : 'Lượt xem thực tế hôm nay'}</span>
           </div>
 
           {/* Ô 4: Trạng Thái Firestore */}
           <div className="p-5 glass-panel rounded-xl border-l-4 border-emerald-500 space-y-1">
             <p className="text-xs text-gray-400 font-semibold uppercase">Trạng Thái Firestore</p>
-            <p className="text-2xl font-black text-emerald-400">Connected</p>
-            <span className="text-[11px] text-gray-400 block pt-1">Batch write sẵn sàng</span>
+            <p className="text-2xl font-black text-emerald-400">{readOnly ? 'Chỉ đọc' : 'Connected'}</p>
+            <span className="text-[11px] text-gray-400 block pt-1">{readOnly ? 'Thao tác ghi đã khóa' : 'Batch write sẵn sàng'}</span>
           </div>
         </div>
 
         {/* Phase 4 Magic Import Tool */}
         <div className="pt-4">
-          <MagicImport />
+          <MagicImport readOnly={readOnly} />
         </div>
       </div>
     </div>

@@ -5,7 +5,7 @@ import { collection, getDocsFromServer, doc, runTransaction } from 'firebase/fir
 import { findMovie, planImport, episodeKey, MOVIE_FIELDS, sourceMovieId } from '../../utils/movieImport.js';
 import { crawlManualUrl, detailsToTSV } from '../../services/phimApiImport.js';
 
-const MagicImport = () => {
+const MagicImport = ({ readOnly = false }) => {
   const [rawText, setRawText] = useState('');
   const [parsedData, setParsedData] = useState([]);
   const [, setExistingMovies] = useState([]);
@@ -22,6 +22,7 @@ const MagicImport = () => {
 
   // Fetch API crawler logic (Runs Backend FastAPI Multi-threaded Crawl with Client Fallback)
   const handleFetchApi = async () => {
+    if (readOnly) return;
     if (!targetUrl.trim()) {
       setCrawlStatus({ type: 'error', text: 'Vui lòng nhập URL phim hoặc link trang danh sách phim!' });
       return;
@@ -156,6 +157,7 @@ const MagicImport = () => {
 
   // Nạp dữ liệu lên Database (Bỏ qua các phim có status === 'duplicate')
   const handleUploadToFirebase = async () => {
+    if (readOnly) return;
     const validMovies = parsedData.filter(m => m.isValid && m.status !== 'duplicate');
     if (!validMovies.length) {
       setErrorMessage('Không có phim mới hoặc thay đổi hợp lệ để nạp.');
@@ -253,7 +255,7 @@ const MagicImport = () => {
             <button
               type="button"
               onClick={handleFetchApi}
-              disabled={isFetchingApi || !targetUrl.trim()}
+              disabled={readOnly || isFetchingApi || !targetUrl.trim()}
               className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-black text-xs font-black transition-all shadow-[0_0_15px_rgba(245,158,11,0.4)] disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap"
             >
               {isFetchingApi ? (
@@ -317,7 +319,7 @@ const MagicImport = () => {
             <button
               type="button"
               onClick={handleUploadToFirebase}
-              disabled={isUploading || isParsing || (countNew === 0 && countUpdate === 0)}
+              disabled={readOnly || isUploading || isParsing || (countNew === 0 && countUpdate === 0)}
               className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-white text-xs font-black transition-all shadow-[0_0_20px_rgba(245,158,11,0.5)] disabled:opacity-50 flex items-center gap-2 cursor-pointer"
             >
               {isUploading ? (

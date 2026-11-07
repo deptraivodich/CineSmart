@@ -11,7 +11,7 @@ const SECTIONS = [
   { id: 'animeVault', name: '⚔️ Kho Tàng Anime Mới Nhất', max: 6, desc: 'Phim đầu tiên là Banner lớn Highlight, các phim sau là tập phim' },
 ];
 
-const HomepageCMS = () => {
+const HomepageCMS = ({ readOnly = false }) => {
   const [allMovies, setAllMovies] = useState([]);
   const [layout, setLayout] = useState({
     top10Movies: [],
@@ -96,6 +96,7 @@ const HomepageCMS = () => {
 
   // Add movie ID to active section
   const handleAddMovieToSection = (movieId) => {
+    if (readOnly) return;
     const currentList = getSectionList(activeSectionId);
     const secConfig = SECTIONS.find(s => s.id === activeSectionId);
 
@@ -115,12 +116,14 @@ const HomepageCMS = () => {
 
   // Remove movie ID from active section
   const handleRemoveMovieFromSection = (movieId) => {
+    if (readOnly) return;
     const currentList = getSectionList(activeSectionId);
     updateSectionList(activeSectionId, currentList.filter(id => id !== movieId));
   };
 
   // Move item up or down in order
   const handleMoveOrder = (index, direction) => {
+    if (readOnly) return;
     const currentList = [...getSectionList(activeSectionId)];
     const targetIndex = direction === 'up' ? index - 1 : index + 1;
 
@@ -136,6 +139,7 @@ const HomepageCMS = () => {
 
   // Save layout config to Firestore & localStorage
   const handleSaveLayout = async () => {
+    if (readOnly) return;
     setIsSaving(true);
     try {
       await saveHomepageLayout(layout);
@@ -189,7 +193,7 @@ const HomepageCMS = () => {
 
         <button
           onClick={handleSaveLayout}
-          disabled={isSaving}
+          disabled={readOnly || isSaving}
           className="px-6 py-3 rounded-xl bg-neon-cyan/20 hover:bg-neon-cyan/30 text-neon-cyan border border-neon-cyan/40 font-black text-xs transition-all shadow-[0_0_20px_rgba(0,240,255,0.4)] disabled:opacity-50 cursor-pointer flex-shrink-0"
         >
           {isSaving ? 'Đang lưu...' : '💾 Lưu Cấu Hình Trang Chủ'}
@@ -253,7 +257,7 @@ const HomepageCMS = () => {
                     <div className="flex items-center space-x-1.5 ml-2">
                       <button
                         onClick={() => handleMoveOrder(idx, 'up')}
-                        disabled={idx === 0}
+                        disabled={readOnly || idx === 0}
                         className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 disabled:opacity-30 text-xs"
                         title="Đẩy lên trên"
                       >
@@ -261,7 +265,7 @@ const HomepageCMS = () => {
                       </button>
                       <button
                         onClick={() => handleMoveOrder(idx, 'down')}
-                        disabled={idx === activeSecList.length - 1}
+                        disabled={readOnly || idx === activeSecList.length - 1}
                         className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 disabled:opacity-30 text-xs"
                         title="Đẩy xuống dưới"
                       >
@@ -269,6 +273,7 @@ const HomepageCMS = () => {
                       </button>
                       <button
                         onClick={() => handleRemoveMovieFromSection(movieId)}
+                        disabled={readOnly}
                         className="p-1.5 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 text-xs font-bold"
                         title="Xóa khỏi mục này"
                       >
@@ -313,7 +318,7 @@ const HomepageCMS = () => {
 
                   <button
                     onClick={() => handleAddMovieToSection(movie.id)}
-                    disabled={isAdded}
+                    disabled={readOnly || isAdded}
                     className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all flex-shrink-0 ${
                       isAdded 
                         ? 'bg-white/10 text-gray-400 cursor-not-allowed' 
