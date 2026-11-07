@@ -12,6 +12,8 @@ function AppContent() {
   const intervalRef = useRef(null);
 
   useEffect(() => {
+    if (import.meta.env.VITE_ADMIN_READ_ONLY === 'true') return;
+
     // Quy tắc chặn (Lock): Nếu pathname đang chứa /admin,
     // TUYỆT ĐỐI NGỪNG không kích hoạt hoặc tạm dừng tiến trình gọi API tự động này để tránh xung đột
     if (isAdmin) {
