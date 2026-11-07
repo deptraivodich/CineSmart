@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import handler from '../api/admin/crawl.js';
 import { crawlAdminMovies } from '../server/adminCrawl.js';
 import { prepareCloudSync, shouldSyncMovie, cloudSyncChunks } from '../src/utils/cloudMovieSync.js';
@@ -12,6 +13,10 @@ function response() {
     json(value) { this.body = value; return this; },
   };
 }
+
+test('Firebase Admin Auth loads when the runtime cannot require ESM modules', () => {
+  execFileSync(process.execPath, ['--no-experimental-require-module', '-e', 'require("firebase-admin/auth")'], { stdio: 'pipe' });
+});
 
 test('Admin API rejects anonymous, local-role and forged Firebase tokens', async () => {
   const forged = ['eyJhbGciOiJub25lIn0', Buffer.from(JSON.stringify({ admin: true, email_verified: true, aud: 'loliphim-db' })).toString('base64url'), 'fake'].join('.');

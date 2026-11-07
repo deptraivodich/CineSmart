@@ -32,6 +32,9 @@
     "vite": "^5.2.11"
   },
   "overrides": {
+    "jwks-rsa": {
+      "jose": "5.10.0"
+    },
     "minimatch": "^11.0.1",
     "rimraf": "^6.1.4"
   },
