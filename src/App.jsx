@@ -1,18 +1,20 @@
 import React, { useEffect, useRef } from 'react';
 import { BrowserRouter, useLocation } from 'react-router-dom';
-import { AuthProvider } from './contexts/AuthContext';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
 import AppRouter from './routers/AppRouter';
 import CineSmartAIBot from './components/ui/CineSmartAIBot';
 import { runAutoUpdate } from './services/autoCrawlService';
 
 function AppContent() {
   const location = useLocation();
+  const { isVerifiedAdmin } = useAuth();
   const isAdmin = location.pathname.includes('/admin');
   const timerRef = useRef(null);
   const intervalRef = useRef(null);
 
   useEffect(() => {
-    if (import.meta.env.VITE_ADMIN_READ_ONLY === 'true') return;
+    if (!isVerifiedAdmin) return;
+    let cancelled = false;
 
     // Quy tắc chặn (Lock): Nếu pathname đang chứa /admin,
     // TUYỆT ĐỐI NGỪNG không kích hoạt hoặc tạm dừng tiến trình gọi API tự động này để tránh xung đột
@@ -46,6 +48,7 @@ function AppContent() {
         console.log('[Auto-Crawl] Kích hoạt kiểm tra tự động đợt đầu...');
         await runAutoUpdate();
         timerRef.current = null;
+        if (cancelled) return;
 
         // 2. Thiết lập chu kỳ kiểm tra định kỳ theo cấu hình trong lúc người dùng treo máy / xem phim
         if (!intervalRef.current && !window.location.pathname.includes('/admin')) {
@@ -67,16 +70,17 @@ function AppContent() {
     }
 
     return () => {
-      if (timerRef.current && isAdmin) {
+      cancelled = true;
+      if (timerRef.current) {
         clearTimeout(timerRef.current);
         timerRef.current = null;
       }
-      if (intervalRef.current && isAdmin) {
+      if (intervalRef.current) {
         clearInterval(intervalRef.current);
         intervalRef.current = null;
       }
     };
-  }, [isAdmin, location.pathname]);
+  }, [isAdmin, location.pathname, isVerifiedAdmin]);
 
   return (
     <>

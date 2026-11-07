@@ -4,6 +4,8 @@ import { db } from '../../services/firebase';
 import { collection, getDocsFromServer, doc, runTransaction } from 'firebase/firestore';
 import { findMovie, planImport, episodeKey, MOVIE_FIELDS, sourceMovieId } from '../../utils/movieImport.js';
 import { crawlManualUrl, detailsToTSV } from '../../services/phimApiImport.js';
+import { adminRequest, getAdminIdToken } from '../../services/adminSession';
+import { getMovies } from '../../services/movieService';
 
 const MagicImport = ({ readOnly = false }) => {
   const [rawText, setRawText] = useState('');
@@ -39,7 +41,11 @@ const MagicImport = ({ readOnly = false }) => {
 
       // 1. Gọi API Backend FastAPI (Chạy cào ĐA LUỒNG Asyncio + Httpx)
       const backendApiUrl = import.meta.env.VITE_CRAWLER_API_URL || 'http://localhost:8000/api/crawl';
-      try {
+      if (import.meta.env.PROD) {
+        const result = await adminRequest({ operation: 'url', url: rawInput });
+        tsvResult = result.tsv;
+        crawledCount = result.count;
+      } else try {
         const response = await fetch(backendApiUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -80,9 +86,9 @@ const MagicImport = ({ readOnly = false }) => {
   };
 
   // Fetch current existing movies in database to detect matches
-  const loadExistingMovies = async () => {
-    const snapshot = await getDocsFromServer(collection(db, 'movies'));
-    const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id }));
+  const loadExistingMovies = async (requireServer = false) => {
+    const snapshot = requireServer ? await getDocsFromServer(collection(db, 'movies')) : null;
+    const list = snapshot ? snapshot.docs.map(d => ({ ...d.data(), id: d.id })) : await getMovies();
     setExistingMovies(list);
     return list;
   };
@@ -168,7 +174,8 @@ const MagicImport = ({ readOnly = false }) => {
     setUploadStatus({ type: 'info', text: 'Đang xác minh và ghi Firestore...' });
     let written = 0, updated = 0, skipped = 0;
     try {
-      const catalog = await loadExistingMovies();
+      await getAdminIdToken();
+      const catalog = await loadExistingMovies(true);
       for (const movie of validMovies) {
         const incoming = Object.fromEntries([...MOVIE_FIELDS, 'episodes'].filter(k => movie[k] !== undefined).map(k => [k, movie[k]]));
         incoming.status = movie.movieStatus || 'ongoing';
