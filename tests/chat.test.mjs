@@ -24,6 +24,16 @@ test('another account history does not influence recommendations', () => {
   assert.deepEqual(other, baseline);
 });
 
+test('a natural-language title search outranks generic wording and unrelated watch preferences', () => {
+  const catalogue = [
+    ...Array.from({ length: 20 }, (_, index) => ({ id: String(index), title: `Cho tôi một phim trong kho ${index}`, genres: ['Romance'] })),
+    { id: 'conan', title: 'Thám tử lừng danh Conan', genres: ['Mystery'] },
+  ];
+  const history = Array.from({ length: 100 }, () => ({ username: 'alice', movieId: '0' }));
+  const context = buildChatContext('Gợi ý cho tôi một anime Conan trong kho và nói ngắn gọn lý do.', catalogue, history, 'alice');
+  assert.equal(context.available_movies[0].title, 'Thám tử lừng danh Conan');
+});
+
 test('Gemini uses server key, limited context and conversation and parses only visible reply', async () => {
   let request;
   const result = await replyToChat({ message: 'Tìm phim', available_movies: movies, conversation: [{ sender: 'ai', text: 'welcome' }, { sender: 'user', text: 'Chào' }] }, {
