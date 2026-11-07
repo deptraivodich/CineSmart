@@ -1,0 +1,17 @@
+node_modules/
+.git/
+.env
+.env.*
+backend/
+scripts/
+tests/
+dist/
+coverage/
+*.log
+*.db
+*.db-*
+*.pem
+*.key
+*firebase-adminsdk*.json
+*service-account*.json
+serviceAccount*.json

@@ -1,5 +1,5 @@
 import React, { lazy, Suspense } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import LoadingScreen from '../components/common/LoadingScreen';
 
@@ -15,6 +15,18 @@ const AdminProtectedRoute = ({ children }) => {
 
   if (loading) {
     return <LoadingScreen message="Đang nạp dữ liệu Admin..." />;
+  }
+
+  if (import.meta.env.VITE_ADMIN_READ_ONLY === 'true') {
+    return (
+      <main className="min-h-screen flex items-center justify-center px-6 bg-slate-950 text-white">
+        <div className="max-w-lg space-y-4 text-center">
+          <h1 className="text-2xl font-bold">Quản trị đang được bảo trì</h1>
+          <p>Chức năng quản lý dữ liệu tạm thời bị khóa. Bạn vẫn có thể xem danh sách và thông tin phim.</p>
+          <Link className="inline-block text-cyan-300 underline" to="/">Về trang chủ</Link>
+        </div>
+      </main>
+    );
   }
 
   // Not admin → redirect to login im  mediately
