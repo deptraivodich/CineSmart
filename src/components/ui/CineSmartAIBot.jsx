@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { getStoredMovies } from '../../services/movieService';
 import { useAuth } from '../../contexts/AuthContext';
 import { getUserWatchHistory } from '../../services/historyService';
+import { buildChatContext, catalogReply } from '../../utils/chatContext.js';
 
 /**
  * CineSmartAIBot Component
@@ -13,195 +14,92 @@ const CineSmartAIBot = () => {
   const [inputText, setInputText] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [isListening, setIsListening] = useState(false);
-
-  const initialWelcomeMessage = {
-    id: 'welcome_msg',
-    sender: 'ai',
-    text: 'Xin chào! Tôi là trợ lý CineSmart AI. Bạn muốn tìm phim gì hôm nay, hay cần tôi gợi ý phim theo đúng gu sở thích của bạn?',
-    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-  };
-
-  const [messages, setMessages] = useState([initialWelcomeMessage]);
+  const [notice, setNotice] = useState('');
+  const welcome = () => ({
+    id: `welcome_${Date.now()}`, sender: 'ai',
+    text: 'Xin chào! Tôi là trợ lý CineSmart. Bạn muốn tìm phim theo tên, thể loại hay cần gợi ý phim hợp gu?',
+    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+  });
+  const [messages, setMessages] = useState(() => [welcome()]);
   const messagesEndRef = useRef(null);
-
-  // Mảng 4 câu hỏi gợi ý nhanh
+  const requestRef = useRef(null);
+  const recognitionRef = useRef(null);
   const quickPrompts = [
     { id: 'prompt_1', text: 'Phim hợp gu tôi', icon: '🎬' },
-    { id: 'prompt_2', text: 'Top Anime xem nhiều', icon: '🔥' },
-    { id: 'prompt_3', text: 'Tâm trạng buồn xem...', icon: '🍿' },
-    { id: 'prompt_4', text: 'Đố tôi 1 câu về anime', icon: '🎯' }
+    { id: 'prompt_2', text: 'Anime đáng xem', icon: '🔥' },
+    { id: 'prompt_3', text: 'Tâm trạng buồn xem gì?', icon: '🍿' },
+    { id: 'prompt_4', text: 'Đố tôi 1 câu về anime', icon: '🎯' },
   ];
 
-
-  // Tự động cuộn xuống tin nhắn mới nhất
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
   useEffect(() => {
-    if (isOpen) {
-      scrollToBottom();
-    }
+    if (isOpen) messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }, [messages, isOpen, isTyping]);
 
-  // Reset đoạn chat (+ Chat mới)
+  useEffect(() => () => {
+    requestRef.current?.abort();
+    recognitionRef.current?.abort();
+  }, []);
+
   const handleResetChat = () => {
-    setMessages([{
-      id: `msg_reset_${Date.now()}`,
-      sender: 'ai',
-      text: 'Xin chào! Tôi là trợ lý CineSmart AI. Bạn muốn tìm phim gì hôm nay, hay cần tôi gợi ý phim theo đúng gu sở thích của bạn?',
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    }]);
+    requestRef.current?.abort();
+    recognitionRef.current?.abort();
+    requestRef.current = null;
+    setIsTyping(false);
+    setIsListening(false);
+    setInputText('');
+    setNotice('');
+    setMessages([welcome()]);
   };
 
-  // Xử lý gửi tin nhắn - Gọi API Backend FastAPI (Gemini 1.5 Flash + ClickHouse Telemetry)
   const handleSendMessage = async (textToSend) => {
-    const text = textToSend || inputText;
-    if (!text.trim()) return;
-
-    const userMsg = {
-      id: `user_${Date.now()}_${Math.random()}`,
-      sender: 'user',
-      text: text.trim(),
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    };
-
-    setMessages((prev) => [...prev, userMsg]);
-    if (!textToSend) setInputText('');
+    const text = (textToSend || inputText).trim();
+    if (!text || !currentUser || requestRef.current) return;
+    let movies = [];
+    let history = [];
+    try { movies = getStoredMovies(); } catch { /* Continue without a local catalogue. */ }
+    try { history = getUserWatchHistory(currentUser.username); } catch { /* Ignore unreadable local history. */ }
+    const context = buildChatContext(text, movies, history, currentUser.username);
+    const controller = new AbortController();
+    requestRef.current = controller;
+    const conversation = messages.filter(message => !message.id.startsWith('welcome_')).slice(-6).map(({ sender, text: message }) => ({ sender, text: message }));
+    setMessages(previous => [...previous, {
+      id: `user_${Date.now()}`, sender: 'user', text,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    }]);
+    setInputText('');
     setIsTyping(true);
-
+    setNotice('');
+    let timedOut = false;
+    const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, 30000);
     try {
-      // 1. Lấy danh sách tên và thể loại tất cả phim thực tế đang có trong kho dữ liệu Web
-      let availableMovies = [];
-      let storedList = [];
-      try {
-        storedList = getStoredMovies();
-        if (Array.isArray(storedList) && storedList.length > 0) {
-          availableMovies = storedList.map(m => {
-            const rawGenres = Array.isArray(m.genres) ? m.genres : (m.genres ? [m.genres] : (m.category ? [m.category] : []));
-            return {
-              id: m.id,
-              title: m.title,
-              originalTitle: m.originalTitle || '',
-              genres: rawGenres.filter(Boolean),
-              description: m.description ? m.description.slice(0, 160) : ''
-            };
-          }).filter(m => m.title);
-        }
-      } catch (e) {
-        console.warn("Could not read stored movies for AI context:", e);
-      }
-
-      // 2. Lấy LỊCH SỬ XEM PHIM THỰC TẾ của tài khoản người dùng hiện tại
-      let userWatchHistory = [];
-      let topGenre = null;
-      try {
-        const username = currentUser?.username;
-        let rawHistory = [];
-        if (username) {
-          rawHistory = getUserWatchHistory(username);
-        }
-        // Fallback: nếu chưa đăng nhập hoặc rawHistory trống, thử đọc toàn bộ lịch sử trong localStorage
-        if (!rawHistory || rawHistory.length === 0) {
-          try {
-            const rawHistStorage = localStorage.getItem('210loliphim_watch_history_db');
-            if (rawHistStorage) {
-              const parsed = JSON.parse(rawHistStorage);
-              if (Array.isArray(parsed) && parsed.length > 0) {
-                rawHistory = parsed;
-              }
-            }
-          } catch (_) {}
-        }
-
-        if (Array.isArray(rawHistory) && rawHistory.length > 0) {
-          const genreCount = {};
-          userWatchHistory = rawHistory.map(item => {
-            let itemGenres = Array.isArray(item.genres) ? item.genres : (item.genres ? [item.genres] : []);
-            // Nếu item history không lưu genres thì tra cứu từ stored movies
-            if (itemGenres.length === 0 && (item.title || item.movieId)) {
-              const matched = storedList.find(m => m.title === item.title || String(m.id) === String(item.movieId));
-              if (matched) {
-                if (Array.isArray(matched.genres)) itemGenres = matched.genres;
-                else if (matched.category) itemGenres = [matched.category];
-              }
-            }
-
-            // Lọc các tag kỹ thuật để chỉ giữ lại thể loại nội dung thực tế (Hành động, Phiêu lưu, v.v.)
-            const filteredGenres = itemGenres.filter(g => {
-              if (!g || typeof g !== 'string') return false;
-              const lower = g.trim().toLowerCase();
-              return !['4k', 'full hd', 'hd', 'thuyết minh', 'vietsub', 'phim bộ', 'phim lẻ'].includes(lower);
-            });
-
-            filteredGenres.forEach(g => {
-              const clean = g.trim();
-              genreCount[clean] = (genreCount[clean] || 0) + 1;
-            });
-
-            return {
-              movieId: item.movieId,
-              title: item.title,
-              genres: filteredGenres,
-              progressText: item.progressText || '',
-              watchTime: item.currentTime || 0
-            };
-          });
-
-          // Xác định thể loại được xem nhiều nhất
-          let maxCount = 0;
-          for (const [genreName, count] of Object.entries(genreCount)) {
-            if (count > maxCount) {
-              maxCount = count;
-              topGenre = genreName;
-            }
-          }
-        }
-      } catch (histErr) {
-        console.warn("Could not read user watch history for AI context:", histErr);
-      }
-
-      const backendApiUrl = import.meta.env.VITE_CHAT_API_URL || 'http://localhost:8000/api/chat';
-      const response = await fetch(backendApiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: text.trim(),
-          user_id: currentUser?.username || 'anonymous',
-          available_movies: availableMovies,
-          user_history: userWatchHistory,
-          top_genre: topGenre
-        })
+      const endpoint = import.meta.env.PROD ? '/api/chat' : import.meta.env.VITE_CHAT_API_URL || 'http://localhost:8000/api/chat';
+      const response = await fetch(endpoint, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...context, conversation }), signal: controller.signal,
       });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error ${response.status}`);
-      }
-
       const data = await response.json();
-      const aiReplyText = data.reply || 'Xin lỗi, tôi chưa thể trả lời tin nhắn của bạn lúc này.';
-
-      const aiMsg = {
-        id: `ai_${Date.now()}_${Math.random()}`,
-        sender: 'ai',
-        text: aiReplyText,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      };
-      setMessages((prev) => [...prev, aiMsg]);
-    } catch (err) {
-      console.warn("Không thể kết nối Backend Chat AI API, thực hiện phản hồi dự phòng:", err);
-      const aiMsg = {
-        id: `ai_${Date.now()}_${Math.random()}`,
-        sender: 'ai',
-        text: `🤖 **Trợ lý CineSmart AI**: Rất tiếc không thể kết nối tới máy chủ AI (http://localhost:8000/api/chat). Bạn hãy chắc chắn dịch vụ FastAPI backend đang chạy nhé!`,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      };
-      setMessages((prev) => [...prev, aiMsg]);
+      if (!response.ok) throw new Error(data.error || 'Dịch vụ chat đang gián đoạn.');
+      if (controller.signal.aborted || requestRef.current !== controller) return;
+      setNotice(data.mode === 'catalog' ? data.notice || 'Đang gợi ý từ kho phim.' : '');
+      setMessages(previous => [...previous, {
+        id: `ai_${Date.now()}`, sender: 'ai', text: data.reply || 'Bạn hãy thử hỏi theo tên phim hoặc thể loại nhé.',
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      }]);
+    } catch (error) {
+      if ((controller.signal.aborted && !timedOut) || requestRef.current !== controller) return;
+      setNotice(timedOut ? 'AI phản hồi chậm. Đang gợi ý từ kho phim.' : 'Kết nối AI đang gián đoạn. Đang gợi ý từ kho phim.');
+      setMessages(previous => [...previous, {
+        id: `fallback_${Date.now()}`, sender: 'ai', text: catalogReply(text, context.available_movies),
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      }]);
     } finally {
-      setIsTyping(false);
+      clearTimeout(timeout);
+      if (requestRef.current === controller) {
+        requestRef.current = null;
+        setIsTyping(false);
+      }
     }
   };
-
 
   // Nhận diện giọng nói (Microphone)
   const handleToggleVoiceInput = () => {
@@ -213,12 +111,14 @@ const CineSmartAIBot = () => {
     }
 
     if (isListening) {
+      recognitionRef.current?.stop();
       setIsListening(false);
       return;
     }
 
     try {
       const recognition = new SpeechRecognition();
+      recognitionRef.current = recognition;
       recognition.lang = 'vi-VN';
       recognition.interimResults = false;
 
@@ -227,17 +127,22 @@ const CineSmartAIBot = () => {
       };
 
       recognition.onresult = (event) => {
+        if (recognitionRef.current !== recognition) return;
         const transcript = event.results[0][0].transcript;
         setInputText(transcript);
         setIsListening(false);
       };
 
       recognition.onerror = () => {
+        if (recognitionRef.current !== recognition) return;
         setIsListening(false);
       };
 
       recognition.onend = () => {
-        setIsListening(false);
+        if (recognitionRef.current === recognition) {
+          recognitionRef.current = null;
+          setIsListening(false);
+        }
       };
 
       recognition.start();
@@ -247,8 +152,10 @@ const CineSmartAIBot = () => {
     }
   };
 
+  if (!currentUser) return null;
+
   return (
-    <div className="fixed bottom-6 right-6 z-[9999] font-sans">
+    <div className="fixed bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-3 right-3 sm:left-auto sm:bottom-6 sm:right-6 z-[9999] font-sans flex justify-end">
       {/* 1. TRẠNG THÁI THU GỌN (COLLAPSED BUTTON) */}
       {!isOpen && (
         <button
@@ -272,10 +179,10 @@ const CineSmartAIBot = () => {
 
       {/* 2. TRẠNG THÁI MỞ RỘNG (EXPANDED CHAT WINDOW) */}
       {isOpen && (
-        <div className="w-80 sm:w-96 h-[500px] bg-gray-900 border border-amber-500/40 rounded-2xl shadow-2xl shadow-black/90 flex flex-col overflow-hidden animate-fadeIn backdrop-blur-xl">
+        <div role="dialog" aria-label="Trợ lý CineSmart" onKeyDown={event => { if (event.key === 'Escape') { recognitionRef.current?.abort(); setIsOpen(false); } }} className="w-full sm:w-96 h-[min(500px,calc(100dvh-1.5rem))] min-h-0 bg-gray-900 border border-amber-500/40 rounded-2xl shadow-2xl shadow-black/90 flex flex-col overflow-hidden animate-fadeIn backdrop-blur-xl">
           {/* HEADER */}
-          <div className="bg-gradient-to-r from-amber-600 via-orange-600 to-amber-700 px-4 py-3 text-white flex items-center justify-between shadow-md border-b border-amber-500/30">
-            <div className="flex items-center gap-2.5">
+          <div className="bg-gradient-to-r from-amber-600 via-orange-600 to-amber-700 px-3 py-3 text-white flex shrink-0 items-center justify-between gap-2 shadow-md border-b border-amber-500/30">
+            <div className="flex flex-1 min-w-0 items-center gap-2">
               {/* Avatar */}
               <div className="relative">
                 <div className="w-8 h-8 rounded-full bg-black/40 border border-amber-200/50 flex items-center justify-center text-xs font-black text-amber-300 shadow-inner">
@@ -283,28 +190,30 @@ const CineSmartAIBot = () => {
                 </div>
                 <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-emerald-400 border-2 border-gray-900 rounded-full"></span>
               </div>
-              <div>
-                <h3 className="font-bold text-xs sm:text-sm text-white leading-tight flex items-center gap-1.5">
-                  <span>Trợ lý CineSmart AI</span>
-                  <span className="text-[10px] bg-black/30 px-1.5 py-0.5 rounded text-amber-200 font-normal">v2.0</span>
+              <div className="min-w-0">
+                <h3 className="font-bold text-xs sm:text-sm text-white leading-tight flex items-center gap-1.5 min-w-0">
+                  <span className="truncate">Trợ lý CineSmart AI</span>
+                  <span className="hidden sm:inline text-[10px] bg-black/30 px-1.5 py-0.5 rounded text-amber-200 font-normal">v2.0</span>
                 </h3>
                 <p className="text-[10px] text-amber-100/90 flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                  <span>Trực tuyến</span>
+                  <span>{isTyping ? 'Đang trả lời...' : 'Sẵn sàng hỗ trợ'}</span>
                 </p>
               </div>
             </div>
 
             {/* Nút thao tác trên Header */}
-            <div className="flex items-center gap-1 text-xs">
+            <div className="flex shrink-0 items-center gap-1 text-xs">
               {/* Nút + Chat mới */}
               <button
                 type="button"
                 onClick={handleResetChat}
                 title="Tạo cuộc trò chuyện mới"
-                className="px-2 py-1 rounded-lg bg-black/25 hover:bg-black/40 text-amber-100 text-[11px] font-semibold transition-colors flex items-center gap-1 cursor-pointer border border-white/10"
+                aria-label="Tạo cuộc trò chuyện mới"
+                className="w-10 h-10 min-[400px]:w-auto min-[400px]:px-2 rounded-lg bg-black/25 hover:bg-black/40 text-amber-100 text-[11px] font-semibold transition-colors flex items-center justify-center gap-1 cursor-pointer border border-white/10"
               >
-                <span>+ Chat mới</span>
+                <span className="hidden min-[400px]:inline">+ Chat mới</span>
+                <span className="min-[400px]:hidden" aria-hidden="true">＋</span>
               </button>
 
               {/* Nút Reload */}
@@ -312,7 +221,7 @@ const CineSmartAIBot = () => {
                 type="button"
                 onClick={handleResetChat}
                 title="Tải lại trò chuyện"
-                className="p-1.5 rounded-lg bg-black/25 hover:bg-black/40 text-amber-100 hover:text-white transition-colors cursor-pointer"
+                className="hidden sm:flex w-10 h-10 items-center justify-center rounded-lg bg-black/25 hover:bg-black/40 text-amber-100 hover:text-white transition-colors cursor-pointer"
               >
                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -322,9 +231,9 @@ const CineSmartAIBot = () => {
               {/* Nút X Đóng cửa sổ */}
               <button
                 type="button"
-                onClick={() => setIsOpen(false)}
+                onClick={() => { recognitionRef.current?.abort(); setIsOpen(false); }}
                 title="Đóng cửa sổ"
-                className="p-1.5 rounded-lg bg-black/25 hover:bg-red-500/80 text-amber-100 hover:text-white transition-colors cursor-pointer ml-0.5"
+                className="w-10 h-10 flex items-center justify-center rounded-lg bg-black/25 hover:bg-red-500/80 text-amber-100 hover:text-white transition-colors cursor-pointer ml-0.5"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
@@ -334,7 +243,7 @@ const CineSmartAIBot = () => {
           </div>
 
           {/* CHAT BODY (KHU VỰC HIỂN THỊ TIN NHẮN) */}
-          <div className="flex-1 p-3.5 space-y-3.5 overflow-y-auto custom-scrollbar bg-gray-950/80">
+          <div role="log" aria-label="Nội dung trò chuyện" aria-live="polite" className="flex-1 min-h-0 p-3.5 space-y-3.5 overflow-y-auto overscroll-contain custom-scrollbar bg-gray-950/80">
             {/* RENDER DANH SÁCH TIN NHẮN */}
             {messages.map((msg, index) => {
               // QUY TẮC BẮT BUỘC: Biến trung gian gán key
@@ -353,7 +262,7 @@ const CineSmartAIBot = () => {
                   )}
 
                   <div
-                    className={`max-w-[82%] p-3 rounded-2xl text-xs leading-relaxed font-sans whitespace-pre-line shadow-md ${
+                    className={`min-w-0 max-w-[82%] p-3 rounded-2xl text-sm sm:text-xs leading-relaxed font-sans whitespace-pre-line break-words [overflow-wrap:anywhere] shadow-md ${
                       isAi
                         ? 'bg-gray-800/90 text-gray-100 border border-amber-500/20 rounded-tl-none'
                         : 'bg-gradient-to-r from-amber-500 to-orange-600 text-white rounded-tr-none font-medium'
@@ -389,6 +298,7 @@ const CineSmartAIBot = () => {
                         key={promptKey}
                         type="button"
                         onClick={() => handleSendMessage(prompt.text)}
+                        disabled={isTyping}
                         className="border border-amber-500/40 hover:border-amber-400 bg-amber-500/10 hover:bg-amber-500/20 text-amber-200 hover:text-white text-[11px] p-2 rounded-xl transition-all text-left flex items-center justify-between font-medium cursor-pointer shadow-sm group"
                       >
                         <span className="truncate">{prompt.text}</span>
@@ -419,7 +329,8 @@ const CineSmartAIBot = () => {
           </div>
 
           {/* INPUT AREA (KHU VỰC NHẬP TIN NHẮN & MICRO) */}
-          <div className="p-3 bg-gray-900 border-t border-gray-800/80">
+          <div className="p-3 shrink-0 bg-gray-900 border-t border-gray-800/80">
+            {notice && <p role="status" className="mb-2 text-xs text-amber-300">{notice}</p>}
             <form
               onSubmit={(e) => {
                 e.preventDefault();
@@ -450,13 +361,15 @@ const CineSmartAIBot = () => {
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
                 placeholder={isListening ? 'Đang nghe giọng nói của bạn...' : 'Nhập tin nhắn hoặc dùng mic...'}
-                className="flex-1 bg-gray-800 text-white text-xs px-3.5 py-2.5 rounded-xl border border-gray-700 focus:outline-none focus:border-amber-500 placeholder-gray-500 font-sans transition-all"
+                maxLength={1500}
+                aria-label="Tin nhắn cho CineSmart"
+                className="flex-1 min-w-0 bg-gray-800 text-white text-base sm:text-xs px-3 py-2.5 rounded-xl border border-gray-700 focus:outline-none focus:border-amber-500 placeholder-gray-500 font-sans transition-all"
               />
 
               {/* Nút Gửi (Send) */}
               <button
                 type="submit"
-                disabled={!inputText.trim()}
+                disabled={isTyping || !inputText.trim()}
                 title="Gửi tin nhắn"
                 className="p-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-white shadow-md disabled:opacity-40 disabled:cursor-not-allowed transition-all cursor-pointer flex-shrink-0"
               >

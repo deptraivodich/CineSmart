@@ -220,7 +220,7 @@ const LoginPage = () => {
                       onChange={(e) => setLoginUsername(e.target.value)}
                       placeholder="Nhập username..."
                       autoComplete="username"
-                      className="w-full py-3 pl-10 pr-4 rounded-xl bg-[#0d0f1a] border border-white/10 text-white text-sm placeholder-gray-500 focus:outline-none focus:border-amber-400 focus:bg-[#111425] transition-all"
+                      className="w-full py-3 pl-10 pr-4 rounded-xl bg-[#0d0f1a] border border-white/10 text-white text-base sm:text-sm placeholder-gray-500 focus:outline-none focus:border-amber-400 focus:bg-[#111425] transition-all"
                     />
                   </div>
                 </div>
@@ -238,7 +238,7 @@ const LoginPage = () => {
                       onChange={(e) => setLoginPassword(e.target.value)}
                       placeholder="Nhập mật khẩu..."
                       autoComplete="current-password"
-                      className="w-full py-3 pl-10 pr-12 rounded-xl bg-[#0d0f1a] border border-white/10 text-white text-sm placeholder-gray-500 focus:outline-none focus:border-amber-400 focus:bg-[#111425] transition-all"
+                      className="w-full py-3 pl-10 pr-12 rounded-xl bg-[#0d0f1a] border border-white/10 text-white text-base sm:text-sm placeholder-gray-500 focus:outline-none focus:border-amber-400 focus:bg-[#111425] transition-all"
                     />
                     <button
                       type="button"
@@ -298,7 +298,7 @@ const LoginPage = () => {
                       onChange={(e) => setRegUsername(e.target.value)}
                       placeholder="Chọn tên đăng nhập..."
                       autoComplete="username"
-                      className="w-full py-3 pl-10 pr-4 rounded-xl bg-[#0d0f1a] border border-white/10 text-white text-sm placeholder-gray-500 focus:outline-none focus:border-emerald-400 focus:bg-[#111425] transition-all"
+                      className="w-full py-3 pl-10 pr-4 rounded-xl bg-[#0d0f1a] border border-white/10 text-white text-base sm:text-sm placeholder-gray-500 focus:outline-none focus:border-emerald-400 focus:bg-[#111425] transition-all"
                     />
                   </div>
                   <p className="text-[10px] text-gray-600 pl-1">Chữ cái, số và dấu gạch dưới, tối thiểu 3 ký tự</p>
@@ -318,7 +318,7 @@ const LoginPage = () => {
                       placeholder="Nhập tuổi..."
                       min="1"
                       max="120"
-                      className="w-full py-3 pl-10 pr-4 rounded-xl bg-[#0d0f1a] border border-white/10 text-white text-sm placeholder-gray-500 focus:outline-none focus:border-emerald-400 focus:bg-[#111425] transition-all"
+                      className="w-full py-3 pl-10 pr-4 rounded-xl bg-[#0d0f1a] border border-white/10 text-white text-base sm:text-sm placeholder-gray-500 focus:outline-none focus:border-emerald-400 focus:bg-[#111425] transition-all"
                     />
                   </div>
                 </div>
@@ -336,7 +336,7 @@ const LoginPage = () => {
                       onChange={(e) => setRegPassword(e.target.value)}
                       placeholder="Tối thiểu 6 ký tự..."
                       autoComplete="new-password"
-                      className="w-full py-3 pl-10 pr-12 rounded-xl bg-[#0d0f1a] border border-white/10 text-white text-sm placeholder-gray-500 focus:outline-none focus:border-emerald-400 focus:bg-[#111425] transition-all"
+                      className="w-full py-3 pl-10 pr-12 rounded-xl bg-[#0d0f1a] border border-white/10 text-white text-base sm:text-sm placeholder-gray-500 focus:outline-none focus:border-emerald-400 focus:bg-[#111425] transition-all"
                     />
                     <button
                       type="button"
@@ -362,7 +362,7 @@ const LoginPage = () => {
                       onChange={(e) => setRegConfirm(e.target.value)}
                       placeholder="Nhập lại mật khẩu..."
                       autoComplete="new-password"
-                      className={`w-full py-3 pl-10 pr-4 rounded-xl bg-[#0d0f1a] border text-white text-sm placeholder-gray-500 focus:outline-none focus:bg-[#111425] transition-all ${
+                      className={`w-full py-3 pl-10 pr-4 rounded-xl bg-[#0d0f1a] border text-white text-base sm:text-sm placeholder-gray-500 focus:outline-none focus:bg-[#111425] transition-all ${
                         regConfirm && regConfirm !== regPassword
                           ? 'border-red-500/50 focus:border-red-500'
                           : regConfirm && regConfirm === regPassword

@@ -6,6 +6,7 @@ backend/
 scripts/
 tests/
 dist/
+.build-anime-validation/
 coverage/
 *.log
 *.db
