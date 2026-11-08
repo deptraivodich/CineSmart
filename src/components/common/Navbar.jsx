@@ -116,7 +116,7 @@ const Navbar = () => {
   return (
     <>
       {/* Main Top Bar Header - Always Solid Navy & Highly Visible */}
-      <header className="fixed top-0 left-0 right-0 z-[9999] bg-[#161a2e]/95 backdrop-blur-md border-b border-white/10 shadow-2xl py-2.5 transition-all">
+      <header data-site-chrome className="fixed top-0 left-0 right-0 z-[9999] bg-[#161a2e]/95 backdrop-blur-md border-b border-white/10 shadow-2xl py-2.5 transition-all">
         <div className="max-w-7xl mx-auto px-3 sm:px-6 md:px-8 flex items-center justify-between gap-2 md:gap-3">
 
           {/* Left Section: Menu Hamburger & Brand Logo with Slogan */}

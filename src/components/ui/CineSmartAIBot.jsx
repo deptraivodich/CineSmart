@@ -89,7 +89,7 @@ const CineSmartAIBot = () => {
       if ((controller.signal.aborted && !timedOut) || requestRef.current !== controller) return;
       setNotice(timedOut ? 'AI phản hồi chậm. Đang gợi ý từ kho phim.' : 'Kết nối AI đang gián đoạn. Đang gợi ý từ kho phim.');
       setMessages(previous => [...previous, {
-        id: `fallback_${Date.now()}`, sender: 'ai', text: catalogReply(text, context.available_movies),
+        id: `fallback_${Date.now()}`, sender: 'ai', text: catalogReply(text, context.available_movies, { catalogTotal: context.catalog_total, matchingTotal: context.matching_total }),
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       }]);
     } finally {
@@ -155,7 +155,7 @@ const CineSmartAIBot = () => {
   if (!currentUser) return null;
 
   return (
-    <div className="fixed bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-3 right-3 sm:left-auto sm:bottom-6 sm:right-6 z-[9999] font-sans flex justify-end">
+    <div data-site-chrome className="fixed bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-3 right-3 sm:left-auto sm:bottom-6 sm:right-6 z-[9999] font-sans flex justify-end">
       {/* 1. TRẠNG THÁI THU GỌN (COLLAPSED BUTTON) */}
       {!isOpen && (
         <button

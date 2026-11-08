@@ -15,6 +15,7 @@ import {
 } from '../../services/interactionService';
 import { useAuth } from '../../contexts/AuthContext';
 import { formatVietnameseSentenceCase, generateSlug } from '../../utils/textUtils';
+import { uniqueMovies } from '../../utils/movieCatalogue.js';
 
 const HomePage = () => {
   const [allMovies, setAllMovies] = useState([]);
@@ -192,10 +193,10 @@ const HomePage = () => {
   // Top 10 Phim Bộ Hôm Nay
   const top10Movies = useMemo(() => {
     if (trendingRankedMovies.length > 0) {
-      return trendingRankedMovies.slice(0, 10);
+      return uniqueMovies(trendingRankedMovies).slice(0, 10);
     }
     const fromLayout = layout?.top10Movies ? getSectionMovies(layout.top10Movies) : [];
-    return fromLayout.length > 0 ? fromLayout : validAllMovies.slice(0, 10);
+    return uniqueMovies(fromLayout.length > 0 ? fromLayout : validAllMovies).slice(0, 10);
   }, [layout, getSectionMovies, validAllMovies, trendingRankedMovies]);
 
   const cinemaMovies = useMemo(() => {
@@ -359,13 +360,13 @@ const HomePage = () => {
       )}
 
       {/* Main Content Container */}
-      <div className="px-4 md:px-12 -mt-4 relative z-20 space-y-12 max-w-7xl mx-auto">
+      <div className="w-full min-w-0 px-4 md:px-12 -mt-4 relative z-20 space-y-12 max-w-7xl mx-auto">
 
         {/* Section: Phim mới cập nhật */}
         <section className="space-y-4 overflow-visible">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-2.5">
-              <div className="w-1.5 h-5 rounded-full bg-neon-cyan shadow-[0_0_10px_#00f0ff]"></div>
+              <div className="w-1.5 h-5 shrink-0 rounded-full bg-neon-cyan shadow-[0_0_10px_#00f0ff]"></div>
               <h2 className="text-lg md:text-xl font-extrabold text-white">Phim Mới Cập Nhật</h2>
             </div>
             <Link to="/the-loai" className="text-xs text-gray-400 hover:text-neon-cyan cursor-pointer">
@@ -413,8 +414,8 @@ const HomePage = () => {
                 className="flex items-center space-x-2.5 cursor-pointer group select-none"
                 title="Bấm vào đây để mở toàn bộ danh sách phim yêu thích"
               >
-                <div className="w-1.5 h-5 rounded-full bg-neon-red shadow-[0_0_12px_#e50914]"></div>
-                <h2 className="text-lg md:text-xl font-extrabold text-white flex items-center gap-2 group-hover:text-neon-red transition-colors">
+                <div className="w-1.5 h-5 shrink-0 rounded-full bg-neon-red shadow-[0_0_12px_#e50914]"></div>
+                <h2 className="text-lg md:text-xl font-extrabold text-white flex flex-wrap items-center gap-2 min-w-0 group-hover:text-neon-red transition-colors">
                   <span>Phim Yêu Thích Của Bạn</span>
                   <span className="text-[10px] px-2 py-0.5 rounded bg-neon-red/20 text-neon-red border border-neon-red/30 font-bold">
                     ❤️ {userFavoriteMovies.length} Phim
@@ -474,15 +475,17 @@ const HomePage = () => {
         {top10Movies.filter(m => m !== undefined && m !== null && m.id).length > 0 && (
           <section className="space-y-4 overflow-visible">
             <div className="flex items-center space-x-2.5">
-              <div className="w-1.5 h-5 rounded-full bg-amber-400 shadow-[0_0_12px_#f59e0b]"></div>
-              <h2 className="text-lg md:text-xl font-extrabold text-white flex items-center gap-2">
+              <div className="w-1.5 h-5 shrink-0 rounded-full bg-amber-400 shadow-[0_0_12px_#f59e0b]"></div>
+              <h2 className="text-lg md:text-xl font-extrabold text-white flex flex-wrap items-center gap-2 min-w-0">
                 <span>Top 10 Phim Bộ Hôm Nay</span>
-                <span className="text-[10px] px-2 py-0.5 rounded bg-amber-400/20 text-amber-300 border border-amber-400/30">🔥 Real-time Trending</span>
+                <span className="text-[10px] px-2 py-0.5 rounded bg-amber-400/20 text-amber-300 border border-amber-400/30">{trendingRankedMovies.length ? `${top10Movies.length} phim có lượt xem` : 'Khám phá kho phim'}</span>
               </h2>
             </div>
 
             <ContinuousMarquee
               items={top10Movies.filter(movie => movie !== undefined && movie !== null && movie.id).slice(0, 10)}
+              loop={false}
+              className="px-3"
               direction="left"
               speed={30}
               renderItem={(movie, idx, isClone) => (
@@ -511,8 +514,8 @@ const HomePage = () => {
                 className="flex items-center space-x-2.5 cursor-pointer group select-none"
                 title="Bấm vào đây để mở toàn bộ danh sách lịch sử xem phim"
               >
-                <div className="w-1.5 h-5 rounded-full bg-neon-cyan shadow-[0_0_12px_#00f0ff]"></div>
-                <h2 className="text-lg md:text-xl font-extrabold text-white flex items-center gap-2 group-hover:text-neon-cyan transition-colors">
+                <div className="w-1.5 h-5 shrink-0 rounded-full bg-neon-cyan shadow-[0_0_12px_#00f0ff]"></div>
+                <h2 className="text-lg md:text-xl font-extrabold text-white flex flex-wrap items-center gap-2 min-w-0 group-hover:text-neon-cyan transition-colors">
                   <span>Lịch Sử Xem Phim</span>
                   <span className="text-[10px] px-2 py-0.5 rounded bg-neon-cyan/20 text-neon-cyan border border-neon-cyan/30 font-bold">
                     🕒 {userHistory.length} Phim
@@ -654,8 +657,8 @@ const HomePage = () => {
         {cinemaMovies.filter(m => m !== undefined && m !== null && m.id).length > 0 && (
           <section className="space-y-4 overflow-visible">
             <div className="flex items-center space-x-2.5">
-              <div className="w-1.5 h-5 rounded-full bg-neon-red shadow-[0_0_12px_#e50914]"></div>
-              <h2 className="text-lg md:text-xl font-extrabold text-white flex items-center gap-2">
+              <div className="w-1.5 h-5 shrink-0 rounded-full bg-neon-red shadow-[0_0_12px_#e50914]"></div>
+              <h2 className="text-lg md:text-xl font-extrabold text-white flex flex-wrap items-center gap-2 min-w-0">
                 <span>Mãn Nhãn Với Phim Chiếu Rạp</span>
                 <span className="text-[10px] px-2 py-0.5 rounded bg-neon-red/20 text-neon-red border border-neon-red/30">🍿 Cinema 4K</span>
               </h2>
@@ -691,7 +694,7 @@ const HomePage = () => {
         {/* SECTION 3: Bảng Xếp Hạng 210LoliPhim (3 cột tương tác thực tế) */}
         <section className="space-y-4">
           <div className="flex items-center space-x-2.5">
-            <div className="w-1.5 h-5 rounded-full bg-purple-500 shadow-[0_0_12px_#a855f7]"></div>
+            <div className="w-1.5 h-5 shrink-0 rounded-full bg-purple-500 shadow-[0_0_12px_#a855f7]"></div>
             <h2 className="text-lg md:text-xl font-extrabold text-white">Bảng Xếp Hạng 210LoliPhim</h2>
           </div>
 
@@ -854,8 +857,8 @@ const HomePage = () => {
         {(animeHighlight || animeVaultMovies.length > 0) && (
           <section className="space-y-6 pt-4 border-t border-white/10">
             <div className="flex items-center space-x-2.5">
-              <div className="w-1.5 h-5 rounded-full bg-pink-500 shadow-[0_0_12px_#ec4899]"></div>
-              <h2 className="text-lg md:text-xl font-extrabold text-white flex items-center gap-2">
+              <div className="w-1.5 h-5 shrink-0 rounded-full bg-pink-500 shadow-[0_0_12px_#ec4899]"></div>
+              <h2 className="text-lg md:text-xl font-extrabold text-white flex flex-wrap items-center gap-2 min-w-0">
                 <span>Kho Tàng Anime Mới Nhất</span>
                 <span className="text-[10px] px-2 py-0.5 rounded bg-pink-500/20 text-pink-400 border border-pink-500/30">⚔️ World of Anime</span>
               </h2>
