@@ -2,6 +2,7 @@ import { randomUUID, createPrivateKey } from 'node:crypto';
 import { findMovie, planImport, sourceMovieId } from '../../src/utils/movieImport.js';
 import { LEASE_MS, newJob, addResult } from './animeRunner.mjs';
 import { SourceError } from './phimApi.mjs';
+import { readFirestore } from './firestoreRecovery.mjs';
 
 export function validateCredentials(env = process.env) {
   const expected = env.FIREBASE_PROJECT_ID || 'loliphim-db';
@@ -40,7 +41,7 @@ export async function connectFirestore(env = process.env) {
 // One bounded catalogue identity scan per invocation, then one document per movie.
 export async function firestoreStore(db, { dryRun = false, now = Date.now } = {}) {
   const owner = randomUUID(), ref = db.doc('crawlerJobs/dailyJapaneseAnime');
-  const snapshot = await db.collection('movies').select('title', 'originalTitle', 'year', 'slug', 'sourceSlug').limit(10001).get();
+  const snapshot = await readFirestore(() => db.collection('movies').select('title', 'originalTitle', 'year', 'slug', 'sourceSlug').limit(10001).get());
   if (snapshot.size > 10000) throw new Error('Catalogue exceeds 10000 movies; migrate to an indexed identity catalogue before running');
   const catalog = snapshot.docs.map(d => ({ ...d.data(), id: d.id }));
   const virtual = new Map();
@@ -85,7 +86,7 @@ export async function firestoreStore(db, { dryRun = false, now = Date.now } = {}
         if (movieRef) {
           existing = virtual.get(id);
           if (!existing) {
-            const doc = await (tx ? tx.get(movieRef) : movieRef.get());
+            const doc = await (tx ? tx.get(movieRef) : readFirestore(() => movieRef.get()));
             if (doc.exists) existing = doc.data();
           }
         }
