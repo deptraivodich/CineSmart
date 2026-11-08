@@ -360,7 +360,7 @@ const HomePage = () => {
       )}
 
       {/* Main Content Container */}
-      <div className="px-4 md:px-12 -mt-4 relative z-20 space-y-12 max-w-7xl mx-auto">
+      <div className="w-full min-w-0 px-4 md:px-12 -mt-4 relative z-20 space-y-12 max-w-7xl mx-auto">
 
         {/* Section: Phim mới cập nhật */}
         <section className="space-y-4 overflow-visible">
@@ -485,6 +485,7 @@ const HomePage = () => {
             <ContinuousMarquee
               items={top10Movies.filter(movie => movie !== undefined && movie !== null && movie.id).slice(0, 10)}
               loop={false}
+              className="px-3"
               direction="left"
               speed={30}
               renderItem={(movie, idx, isClone) => (
