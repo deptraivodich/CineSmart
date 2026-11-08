@@ -16,6 +16,7 @@ const ContinuousMarquee = ({
   direction = 'right',
   speed = 30, // px per second
   renderItem,
+  loop = true,
   gapClass = 'gap-3 sm:gap-4',
   className = ''
 }) => {
@@ -48,6 +49,7 @@ const ContinuousMarquee = ({
   const initializedOffsetRef = useRef(false);
 
   const safeSpeed = speed > 0 ? speed : 30;
+  const loopEnabled = loop && Array.isArray(items) && items.length >= 4;
 
   // Exact measurement of 1 full cycle (D), including the junction gap
   const measureCycle = useCallback(() => {
@@ -75,6 +77,7 @@ const ContinuousMarquee = ({
   }, []);
 
   useEffect(() => {
+    if (!loopEnabled) return;
     measureCycle();
 
     const handleResize = () => {
@@ -98,11 +101,11 @@ const ContinuousMarquee = ({
       if (observer) observer.disconnect();
       clearTimeout(timer);
     };
-  }, [items, measureCycle]);
+  }, [items, measureCycle, loopEnabled]);
 
   // Main 60fps RequestAnimationFrame Loop
   useEffect(() => {
-    if (!isMeasured || cycleWidth <= 0) return;
+    if (!loopEnabled || !isMeasured || cycleWidth <= 0) return;
 
     const animate = (timestamp) => {
       if (!lastFrameTimeRef.current) {
@@ -154,12 +157,12 @@ const ContinuousMarquee = ({
         cancelAnimationFrame(rafIdRef.current);
       }
     };
-  }, [isMeasured, cycleWidth, direction, safeSpeed]);
+  }, [isMeasured, cycleWidth, direction, safeSpeed, loopEnabled]);
 
   // Native non-passive Mouse Wheel Listener (allows smooth horizontal scrubbing without jumping page)
   useEffect(() => {
     const container = containerRef.current;
-    if (!container) return;
+    if (!loopEnabled || !container) return;
 
     const handleWheel = (e) => {
       const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
@@ -178,7 +181,7 @@ const ContinuousMarquee = ({
     return () => {
       container.removeEventListener('wheel', handleWheel);
     };
-  }, []);
+  }, [loopEnabled]);
 
   // Pointer / Drag-to-Scrub Handlers
   const handlePointerDown = (e) => {
@@ -237,6 +240,10 @@ const ContinuousMarquee = ({
 
   // Fast-Forward Step by Arrow Buttons (~320px per click)
   const handleStep = (stepDir) => {
+    if (!loopEnabled) {
+      containerRef.current?.scrollBy({ left: stepDir * 320, behavior: 'smooth' });
+      return;
+    }
     lastInteractionTimeRef.current = Date.now();
     // stepDir: -1 for left (tua lùi), 1 for right (tua tới)
     velocityRef.current = -stepDir * 1400;
@@ -244,15 +251,15 @@ const ContinuousMarquee = ({
 
   if (!items || items.length === 0) return null;
 
-  const setsArray = Array.from({ length: numSets });
+  const setsArray = Array.from({ length: loopEnabled ? numSets : 1 });
 
   return (
     <div
       ref={containerRef}
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerUp}
-      onPointerCancel={handlePointerUp}
+      onPointerDown={loopEnabled ? handlePointerDown : undefined}
+      onPointerMove={loopEnabled ? handlePointerMove : undefined}
+      onPointerUp={loopEnabled ? handlePointerUp : undefined}
+      onPointerCancel={loopEnabled ? handlePointerUp : undefined}
       onClickCapture={handleClickCapture}
       onMouseEnter={() => {
         isHoveredRef.current = true;
@@ -264,9 +271,9 @@ const ContinuousMarquee = ({
         handlePointerUp();
       }}
       onDragStart={(e) => e.preventDefault()}
-      className={`group/marquee relative w-full overflow-x-hidden overflow-y-visible py-8 -my-4 select-none touch-pan-y ${
-        isDragging ? 'cursor-grabbing' : 'cursor-grab'
-      } ${className}`}
+      className={`group/marquee relative w-full min-w-0 overflow-y-hidden py-8 -my-4 select-none ${
+        loopEnabled ? 'overflow-x-hidden touch-pan-y' : 'overflow-x-auto no-scrollbar'
+      } ${isDragging ? 'cursor-grabbing' : 'cursor-grab'} ${className}`}
     >
       {/* Edge Shadow Fades for Cinema Look */}
       <div className="absolute left-0 top-0 bottom-0 w-8 sm:w-16 bg-gradient-to-r from-[#0b0f19] to-transparent pointer-events-none z-20" />
@@ -302,7 +309,7 @@ const ContinuousMarquee = ({
         ref={trackRef}
         className={`flex flex-nowrap items-center ${gapClass} w-max will-change-transform`}
         style={{
-          transform: `translate3d(${currentOffsetRef.current}px, 0, 0)`
+          transform: loopEnabled ? `translate3d(${currentOffsetRef.current}px, 0, 0)` : undefined
         }}
       >
         {setsArray.map((_, setIdx) => {

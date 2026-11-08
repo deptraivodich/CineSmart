@@ -1,4 +1,6 @@
 import { replyToChat } from '../server/chat.js';
+import { getCatalogueTotal } from '../server/catalogue.js';
+import { chatIntent } from '../src/utils/chatContext.js';
 
 const requests = new Map();
 
@@ -28,5 +30,10 @@ export default async function handler(request, response) {
   }
   entry.count++;
   requests.set(ip, entry);
-  return response.status(200).json(await replyToChat(body, { apiKey: process.env.GEMINI_API_KEY, model: process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite' }));
+  const cloudTotal = chatIntent(body.message) === 'count' ? await getCatalogueTotal() : null;
+  return response.status(200).json(await replyToChat(body, {
+    apiKey: process.env.GEMINI_API_KEY,
+    model: process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite',
+    cloudTotal,
+  }));
 }
