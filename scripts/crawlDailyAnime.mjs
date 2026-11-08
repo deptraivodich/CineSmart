@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { createSource, pageRange } from './lib/phimApi.mjs';
 import { runAnimeSync } from './lib/animeRunner.mjs';
 import { connectFirestore, firestoreStore } from './lib/firestoreStore.mjs';
+import { completedDailySync, isFirestoreQuotaError, nextQuotaReset, readFirestore } from './lib/firestoreRecovery.mjs';
 
 export function options(env = process.env, argv = process.argv.slice(2)) {
   const automatic = env.GITHUB_EVENT_NAME === 'schedule';
@@ -21,15 +22,35 @@ export function options(env = process.env, argv = process.argv.slice(2)) {
   }
   return { start, end, dryRun, mode: automatic ? 'automatic' : 'manual' };
 }
-export async function main() {
-  const settings = options();
-  const connection = await connectFirestore();
+async function writeReport(report, env, log) {
+  log(report);
+  if (env.GITHUB_STEP_SUMMARY) await appendFile(env.GITHUB_STEP_SUMMARY, '\n```text\n' + report + '\n```\n');
+}
+
+export async function main({
+  env = process.env,
+  argv = process.argv.slice(2),
+  connect = connectFirestore,
+  source = createSource(),
+  now = Date.now,
+  sleep,
+  log = console.log,
+} = {}) {
+  const settings = options(env, argv);
+  const connection = await connect(env);
   let stopping = false;
   const stop = () => { stopping = true; };
   process.once('SIGTERM', stop); process.once('SIGINT', stop);
   try {
-    const store = await firestoreStore(connection.db, settings);
-    const job = await runAnimeSync({ ...settings, store, source: createSource(), shouldStop: () => stopping });
+    // Check one document before scanning the catalogue or contacting the source.
+    const checkpoint = await readFirestore(() => connection.db.doc('crawlerJobs/dailyJapaneseAnime').get(), { sleep });
+    const previous = checkpoint.data();
+    if (!settings.dryRun && settings.mode === 'automatic' && completedDailySync(previous, now())) {
+      await writeReport(`CineSmart Japanese anime sync\nStatus: already_completed_today\nFull pages 1-10 sync finished at ${previous.finishedAt}\nMovies changed in this recovery invocation: 0`, env, log);
+      return { status: 'already_completed_today' };
+    }
+    const store = await firestoreStore(connection.db, { ...settings, now });
+    const job = await runAnimeSync({ ...settings, store, source, now, log, shouldStop: () => stopping });
     const report = [
       'CineSmart Japanese anime sync',
       'Mode: ' + (settings.dryRun ? 'dry-run (no Firestore writes)' : settings.mode),
@@ -40,10 +61,22 @@ export async function main() {
       'Failed movies: ' + job.failures.length, 'Error attempts: ' + job.stats.errors,
       'Retry queue: ' + JSON.stringify(job.failures.filter(f => f.retryable && f.attempts < 3)),
     ].join('\n');
-    console.log(report);
-    if (process.env.GITHUB_STEP_SUMMARY) await appendFile(process.env.GITHUB_STEP_SUMMARY, '\n```text\n' + report + '\n```\n');
+    await writeReport(report, env, log);
     // Pending work/errors are visible failures; never claim a completed sync.
     if (job.status !== 'completed') process.exitCode = 1;
+    return job;
+  } catch (error) {
+    if (!isFirestoreQuotaError(error)) throw error;
+    const resumeAt = nextQuotaReset(now());
+    await writeReport([
+      'CineSmart Japanese anime sync',
+      'Status: deferred_firestore_quota',
+      'Firestore returned RESOURCE_EXHAUSTED after bounded read retries or during persistence.',
+      'Synchronization is incomplete. The next invocation will retry using the last persisted checkpoint.',
+      'Expected daily quota reset (with buffer): ' + new Date(resumeAt).toISOString(),
+      'Automatic recovery is scheduled for 16:30 Vietnam time. Repeated exhaustion remains deferred.',
+    ].join('\n'), env, log);
+    return { status: 'deferred_firestore_quota', resumeAt };
   } finally {
     process.removeListener('SIGTERM', stop); process.removeListener('SIGINT', stop);
     await connection.close();

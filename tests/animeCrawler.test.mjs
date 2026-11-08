@@ -6,7 +6,8 @@ import { runAnimeSync } from '../scripts/lib/animeRunner.mjs';
 import { firestoreStore, validateCredentials, connectFirestore } from '../scripts/lib/firestoreStore.mjs';
 import { generateKeyPairSync } from 'node:crypto';
 import { checkAnimeSource } from '../scripts/checkAnimeSource.mjs';
-import { options } from '../scripts/crawlDailyAnime.mjs';
+import { main, options } from '../scripts/crawlDailyAnime.mjs';
+import { completedDailySync, isFirestoreQuotaError, nextQuotaReset, readFirestore } from '../scripts/lib/firestoreRecovery.mjs';
 import { normalizePhimApiMovie, isJapaneseAnimation, findMovie, planImport, episodeKey, movieToTSV } from '../src/utils/movieImport.js';
 import { parseTSV } from '../src/utils/MagicParser.js';
 import { detailsToTSV, crawlManualUrl } from '../src/services/phimApiImport.js';
@@ -254,6 +255,7 @@ test('manual browser fallback retains original list filters and preserves full e
 test('workflow is daily Vietnam time, read-only repository permission and one cross-branch concurrency group', async () => {
   const yaml = await readFile(new URL('../.github/workflows/daily-anime-crawler.yml', import.meta.url), 'utf8');
   assert.match(yaml, /30 18 \* \* \*/);
+  assert.match(yaml, /30 9 \* \* \*/);
   assert.match(yaml, /group: cinesmart-firestore-anime-writer/);
   assert.match(yaml, /cancel-in-progress: false/);
   assert.match(yaml, /contents: read/);
@@ -476,4 +478,123 @@ test('GitHub writes require an approved default-branch schedule or manual run', 
   for (const change of [{ GITHUB_REF: 'refs/heads/feat/daily-anime-crawler' }, { CRAWLER_DEFAULT_BRANCH: '' }, { GITHUB_EVENT_NAME: 'pull_request' }, { GITHUB_EVENT_NAME: 'push' }]) {
     assert.throws(() => options({ ...env, ...change }, []), /Production writes require the default branch/);
   }
+});
+
+test('Firestore read retries are bounded and permanent permission failures stay visible', async () => {
+  const delays = [];
+  let calls = 0;
+  const result = await readFirestore(async () => {
+    calls++;
+    if (calls < 3) throw Object.assign(new Error('temporary'), { code: calls === 1 ? 8 : 14 });
+    return 'read-complete';
+  }, { sleep: async ms => { delays.push(ms); } });
+  assert.equal(result, 'read-complete');
+  assert.deepEqual(delays, [1000, 2000]);
+  calls = 0;
+  await assert.rejects(readFirestore(async () => {
+    calls++;
+    throw Object.assign(new Error('quota'), { code: 8 });
+  }, { sleep: async () => {} }), error => isFirestoreQuotaError(error));
+  assert.equal(calls, 3);
+  calls = 0;
+  await assert.rejects(readFirestore(async () => {
+    calls++;
+    throw Object.assign(new Error('permission denied'), { code: 7 });
+  }), /permission denied/);
+  assert.equal(calls, 1);
+  assert.equal(isFirestoreQuotaError({ code: 'firestore/resource-exhausted' }), true);
+  assert.equal(isFirestoreQuotaError({ code: 'RESOURCE_EXHAUSTED' }), true);
+  assert.equal(isFirestoreQuotaError(new SourceError('Source HTTP 429')), false);
+});
+
+test('quota reset follows Pacific midnight across winter, summer and daylight-saving transitions', () => {
+  for (const [now, reset] of [
+    ['2026-01-05T20:00:00Z', '2026-01-06T08:10:00.000Z'],
+    ['2026-07-05T20:00:00Z', '2026-07-06T07:10:00.000Z'],
+    ['2026-03-08T08:30:00Z', '2026-03-09T07:10:00.000Z'],
+    ['2026-11-01T08:30:00Z', '2026-11-02T08:10:00.000Z'],
+  ]) assert.equal(new Date(nextQuotaReset(Date.parse(now))).toISOString(), reset);
+});
+
+test('recovery skips only a completed full ten-page sync from the same Vietnam calendar day', () => {
+  const job = { status: 'completed', start: 1, end: 10, stats: { pages: 10 }, finishedAt: '2026-11-07T22:30:00Z' };
+  assert.equal(completedDailySync(job, Date.parse('2026-11-08T09:30:00Z')), true);
+  assert.equal(completedDailySync(job, Date.parse('2026-11-08T18:30:00Z')), false);
+  for (const change of [{ status: 'pending' }, { status: 'completed_with_errors' }, { end: 1 }, { stats: { pages: 9 } }, { finishedAt: 'invalid' }]) {
+    assert.equal(completedDailySync({ ...job, ...change }, Date.parse('2026-11-08T09:30:00Z')), false);
+  }
+});
+
+test('normal CLI entry defers exhausted quota before catalogue reads or source requests and closes the connection', async () => {
+  const source = fixtureSource(), logs = [];
+  let reads = 0, closed = false;
+  const result = await main({
+    env: {}, argv: [], source, now: () => Date.parse('2026-11-07T22:11:00Z'), sleep: async () => {},
+    log: message => logs.push(message),
+    connect: async () => ({
+      db: { doc: () => ({ get: async () => { reads++; throw Object.assign(new Error('private SDK details'), { code: 8 }); } }) },
+      close: async () => { closed = true; },
+    }),
+  });
+  assert.equal(result.status, 'deferred_firestore_quota');
+  assert.equal(reads, 3);
+  assert.equal(closed, true);
+  assert.deepEqual(source.calls, { pages: [], details: [] });
+  assert.ok(logs.join('\n').includes('Synchronization is incomplete'));
+  assert.ok(!logs.join('\n').includes('private SDK details'));
+});
+
+test('normal scheduled entry skips the catalogue scan after an already completed daily run', async () => {
+  const source = fixtureSource();
+  const job = { status: 'completed', start: 1, end: 10, stats: { pages: 10 }, finishedAt: '2026-11-07T22:30:00Z' };
+  const db = new MemoryFirestore({ 'crawlerJobs/dailyJapaneseAnime': job });
+  db.collection = () => assert.fail('Completed recovery must not scan the catalogue');
+  const result = await main({
+    env: { GITHUB_EVENT_NAME: 'schedule', CRAWLER_DRY_RUN: 'false', CRAWLER_WRITES_ENABLED: 'true' },
+    argv: [], source, now: () => Date.parse('2026-11-08T09:30:00Z'), log: noop,
+    connect: async () => ({ db, close: async () => {} }),
+  });
+  assert.equal(result.status, 'already_completed_today');
+  assert.equal(db.writes, 0);
+  assert.deepEqual(source.calls, { pages: [], details: [] });
+});
+
+test('quota during movie persistence preserves the committed cursor and resumes without duplicate writes', async () => {
+  const db = new MemoryFirestore();
+  const transact = db.runTransaction.bind(db);
+  let rejectSecondMovie = true;
+  db.runTransaction = callback => transact(tx => {
+    const create = tx.create;
+    tx.create = (ref, data) => {
+      if (rejectSecondMovie && ref.path === 'movies/kkphim-anime-two') throw Object.assign(new Error('quota'), { code: 8 });
+      return create(ref, data);
+    };
+    return callback(tx);
+  });
+  const source = fixtureSource();
+  const params = {
+    env: { GITHUB_EVENT_NAME: 'schedule', CRAWLER_DRY_RUN: 'false', CRAWLER_WRITES_ENABLED: 'true' },
+    argv: [], source, now: () => Date.parse('2026-11-08T04:00:00Z'), log: noop,
+    connect: async () => ({ db, close: async () => {} }),
+  };
+  assert.equal((await main(params)).status, 'deferred_firestore_quota');
+  assert.equal(db.movieWrites, 1);
+  assert.equal(db.data.get('crawlerJobs/dailyJapaneseAnime').index, 1);
+  rejectSecondMovie = false;
+  source.calls.details.length = 0;
+  const result = await main(params);
+  assert.equal(result.status, 'completed');
+  assert.equal(result.stats.new, 2);
+  assert.equal(db.movieWrites, 2);
+  assert.deepEqual(source.calls.details, ['anime-two']);
+});
+
+test('normal CLI entry does not convert Firebase permission errors into quota deferral', async () => {
+  await assert.rejects(main({
+    env: {}, argv: [], log: noop,
+    connect: async () => ({
+      db: { doc: () => ({ get: async () => { throw Object.assign(new Error('denied'), { code: 7 }); } }) },
+      close: async () => {},
+    }),
+  }), error => error.code === 7);
 });
