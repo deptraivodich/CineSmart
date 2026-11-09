@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { formatVietnameseSentenceCase } from '../../utils/textUtils';
+import { isFeatureMovie } from '../../utils/movieFormat.js';
 import { generateSlug } from '../../utils/slugUtils';
 import { trackEvent } from '../../services/telemetryService';
 
@@ -181,10 +182,10 @@ const MovieCard = ({
                 {year}
               </span>
               <span className="px-1.5 py-0.5 rounded bg-gray-800 text-gray-300">
-                {season}
+                {isFeatureMovie(movie) ? 'Movie' : season}
               </span>
               <span className="px-1.5 py-0.5 rounded bg-gray-800 text-gray-300">
-                {episodesStatus}
+                {isFeatureMovie(movie) ? 'Full' : episodesStatus}
               </span>
             </div>
 

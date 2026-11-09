@@ -6,7 +6,7 @@ import Secret210Modal from '../ui/Secret210Modal';
 import dragonLogo from '../../assets/dragon-logo.png';
 import meoDenLogo from '../../assets/meo_den.png';
 
-// 47 Standard Anime & Film Genres list (Sorted A-Z)
+// Standard Anime & Film Genres list (Sorted A-Z)
 export const ANIME_GENRES = [
   'Action',
   'Adventure',
@@ -30,6 +30,7 @@ export const ANIME_GENRES = [
   'Martial Arts',
   'Mecha',
   'Military',
+  'Movie',
   'Music',
   'Mystery',
   'Parody',

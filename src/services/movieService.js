@@ -10,6 +10,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { deduplicateEpisodes } from '../utils/textUtils';
+import { withMovieFormat } from '../utils/movieFormat.js';
 import { getAdminIdToken } from './adminSession';
 import { prepareCloudSync, shouldSyncMovie, cloudSyncChunks } from '../utils/cloudMovieSync.js';
 
@@ -136,11 +137,14 @@ const withTimeout = (promise, ms = 3000) => {
 export const getStoredMovies = () => {
   try {
     const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem('cobephim_movies_db');
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed.map(withMovieFormat);
+    }
   } catch (e) {
     console.warn("Error reading local cache:", e);
   }
-  return [...DEFAULT_INITIAL_MOVIES];
+  return DEFAULT_INITIAL_MOVIES.map(withMovieFormat);
 };
 
 export const saveStoredMovies = (moviesList) => {
@@ -220,6 +224,8 @@ const fetchMoviesCatalog = async () => {
     // Backend offline -> Tiếp tục với dữ liệu hiện tại
   }
 
+  movies = movies.map(withMovieFormat);
+
   // Sort newest created first in memory
   movies.sort((a, b) => {
     const timeA = new Date(a.createdAt || a.updatedAt || 0).getTime();
@@ -254,7 +260,7 @@ export const getMovieById = async (id) => {
     const docRef = doc(db, COLLECTION_NAME, id);
     const docSnap = await withTimeout(getDoc(docRef), 2500);
     if (docSnap && docSnap.exists()) {
-      return { id: docSnap.id, ...docSnap.data() };
+      return withMovieFormat({ id: docSnap.id, ...docSnap.data() });
     }
   } catch (error) {
     console.warn(`Firestore getMovieById (${id}) fallback:`, error.message);

@@ -55,7 +55,7 @@ export function sourceMovieId(slug) {
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug) || slug.length > 180) throw new Error('Invalid source slug');
   return 'kkphim-' + slug;
 }
-export const MOVIE_FIELDS = ['title', 'originalTitle', 'poster', 'banner', 'imdb', 'year', 'country', 'director', 'genres', 'category', 'description', 'quality', 'ageRating', 'status', 'episodeCurrent', 'episodesStatus', 'sourceSlug', 'sourceUpdatedAt'];
+export const MOVIE_FIELDS = ['title', 'originalTitle', 'poster', 'banner', 'imdb', 'year', 'country', 'director', 'genres', 'category', 'description', 'quality', 'ageRating', 'duration', 'totalEpisodes', 'status', 'episodeCurrent', 'episodesStatus', 'sourceSlug', 'sourceUpdatedAt'];
 const mutable = ['country', 'director', 'status', 'episodeCurrent', 'episodesStatus'];
 export function planImport(existing, incoming, now = new Date().toISOString()) {
   if (incoming.sourceSlug) sourceMovieId(incoming.sourceSlug);
@@ -101,7 +101,7 @@ export function normalizePhimApiMovie(data) {
   const image = v => !v ? '' : /^https?:\/\//i.test(v) ? v : `https://phimimg.com/${v.replace(/^\//, '')}`;
   const episodes = (data.episodes[0]?.server_data || []).map((ep, i) => ({ name: text(ep.name || i + 1), url: text(ep.link_m3u8 || ep.link_embed) })).filter(ep => validStream(ep.url));
   const genres = (m.category || []).map(c => c.name).filter(Boolean), title = text(m.name);
-  return { title: title.charAt(0).toUpperCase() + title.slice(1).toLowerCase(), originalTitle: text(m.origin_name), poster: image(m.poster_url || m.thumb_url), banner: image(m.thumb_url || m.poster_url), imdb: text(m.imdb?.vote_average || m.tmdb?.vote_average), year: text(m.year), country: names(m.country), director: names(m.director), genres, category: genres.join(', '), description: text(m.content).replace(/<[^>]*>/g, '').replace(/\s+/g, ' '), quality: text(m.quality), ageRating: text(m.age_rating), episodes, episodesCount: `${episodes.length} Tập`, status: ['completed', 'ongoing', 'trailer'].includes(m.status) ? m.status : '', episodeCurrent: text(m.episode_current), episodesStatus: text(m.episode_current), m3u8Url: episodes[0]?.url || '', sourceSlug: m.slug, sourceUpdatedAt: text(m.modified?.time) };
+  return { title: title.charAt(0).toUpperCase() + title.slice(1).toLowerCase(), originalTitle: text(m.origin_name), poster: image(m.poster_url || m.thumb_url), banner: image(m.thumb_url || m.poster_url), imdb: text(m.imdb?.vote_average || m.tmdb?.vote_average), year: text(m.year), country: names(m.country), director: names(m.director), genres, category: genres.join(', '), description: text(m.content).replace(/<[^>]*>/g, '').replace(/\s+/g, ' '), duration: text(m.time), totalEpisodes: text(m.episode_total), quality: text(m.quality), ageRating: text(m.age_rating), episodes, episodesCount: `${episodes.length} Tập`, status: ['completed', 'ongoing', 'trailer'].includes(m.status) ? m.status : '', episodeCurrent: text(m.episode_current), episodesStatus: text(m.episode_current), m3u8Url: episodes[0]?.url || '', sourceSlug: m.slug, sourceUpdatedAt: text(m.modified?.time) };
 }
 export function movieToTSV(movie) {
   const fields = [...MOVIE_FIELDS, 'episode', 'videoUrl'];

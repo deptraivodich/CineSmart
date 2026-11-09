@@ -10,6 +10,8 @@ export { formatVietnameseSentenceCase };
 
 // Flexible Column Alias Mapping Dictionary
 const COLUMN_ALIASES = {
+  duration: ['duration', 'time', 'thời lượng', 'thoi luong', 'runtime'],
+  totalEpisodes: ['totalepisodes', 'episode_total', 'tổng số tập', 'tong so tap'],
   sourceSlug: ['sourceslug'],
   sourceUpdatedAt: ['sourceupdatedat'],
   episodesStatus: ['episodesstatus'],
@@ -148,6 +150,8 @@ export const parseTSV = (rawText) => {
         director: (rawObject.director || 'Đang cập nhật').trim(),
         genres: genresArray.length > 0 ? genresArray : ['Action', 'Fantasy'],
         category: genresArray.length > 0 ? genresArray.join(', ') : 'Action, Fantasy',
+        duration: (rawObject.duration || '').trim(),
+        totalEpisodes: (rawObject.totalEpisodes || '').trim(),
         quality: (rawObject.quality || '4K UltraHD').trim(),
         ageRating: (rawObject.ageRating || '16+').trim(),
         poster: posterUrl,
@@ -168,7 +172,7 @@ export const parseTSV = (rawText) => {
       if (!epUrl) movieData.missingFields.push('Link Video Tập 1');
 
       if (rawObject.sourceSlug) {
-        for (const key of ['originalTitle', 'poster', 'banner', 'imdb', 'year', 'country', 'director', 'quality', 'description', 'ageRating', 'sourceSlug', 'sourceUpdatedAt']) {
+        for (const key of ['originalTitle', 'poster', 'banner', 'imdb', 'year', 'country', 'director', 'quality', 'description', 'ageRating', 'duration', 'totalEpisodes', 'sourceSlug', 'sourceUpdatedAt']) {
           movieData[key] = rawObject[key] || '';
         }
         movieData.genres = rawObject.genres ? parseGenresArray(rawObject.genres) : [];
