@@ -11,6 +11,7 @@ import {
   formatDurationToMinutesSeconds 
 } from '../../services/historyService';
 import { formatVietnameseSentenceCase, extractCleanEpisodeNumber, formatEpisodeTitle, deduplicateEpisodes } from '../../utils/textUtils';
+import { isFeatureMovie } from '../../utils/movieFormat.js';
 import { generateSlug } from '../../utils/slugUtils';
 import { trackEvent } from '../../services/telemetryService';
 import { recordMovieView, getMovieStats, toggleMovieLike } from '../../services/interactionService';
@@ -104,6 +105,8 @@ const WatchPage = () => {
   const activeStreamUrl = activeEpisodeObj?.url || activeEpisodeObj?.m3u8Url || currentMovie?.m3u8Url || 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8';
   const currentEpName = extractCleanEpisodeNumber(activeEpisodeObj?.name || activeEpisodeObj?.number || cleanEpState, '1');
   const formattedTitle = formatVietnameseSentenceCase(currentMovie?.title || 'Phim mới');
+  const isMovie = isFeatureMovie(currentMovie);
+  const episodeLabel = isMovie ? 'Full' : formatEpisodeTitle(currentEpName);
 
   // Episode Pagination / Chunking (Max 100 episodes per range tab)
   const CHUNK_SIZE = 100;
@@ -226,12 +229,6 @@ const WatchPage = () => {
     }
   };
 
-  const handleSeekForward = () => {
-    if (playerRef.current) {
-      playerRef.current.seek(15);
-    }
-  };
-
   const handleToggleFavorite = async () => {
     if (!currentMovie?.id) return;
     const username = currentUser?.username || 'anonymous';
@@ -281,7 +278,7 @@ const WatchPage = () => {
           <span>/</span>
           <Link to={`/movie/${movieSlug}`} className="hover:text-neon-cyan transition-colors">{formattedTitle}</Link>
           <span>/</span>
-          <span className="text-amber-400 font-bold">{formatEpisodeTitle(currentEpName)}</span>
+          <span className="text-amber-400 font-bold">{episodeLabel}</span>
         </div>
 
         {/* Resume Watching Prompt Dialog Overlay */}
@@ -299,7 +296,7 @@ const WatchPage = () => {
                   </span>
                 </h4>
                 <p className="text-xs text-gray-300 mt-0.5">
-                  Bạn đã xem đến <strong className="text-amber-300">{resumePrompt.formattedTime}</strong> ở {formatEpisodeTitle(currentEpName)}. Bạn có muốn tiếp tục xem không?
+                  Bạn đã xem đến <strong className="text-amber-300">{resumePrompt.formattedTime}</strong> ở {episodeLabel}. Bạn có muốn tiếp tục xem không?
                 </p>
               </div>
             </div>
@@ -338,7 +335,7 @@ const WatchPage = () => {
             key={`${activeId}-${currentEpName}-${activeStreamUrl}`}
             ref={playerRef}
             url={activeStreamUrl}
-            title={`${formattedTitle} - ${formatEpisodeTitle(currentEpName)} (${quality})`}
+            title={`${formattedTitle} - ${episodeLabel} (${quality})`}
             poster={banner || poster}
             onTimeUpdate={handleTimeUpdate}
             onPlay={handleVideoPlay}
@@ -346,13 +343,13 @@ const WatchPage = () => {
           />
         </div>
 
-        {/* Player External Controls Test & Movie Information */}
-        <div className="p-6 rounded-2xl glass-panel flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-white flex items-center gap-3">
+        {/* Movie information and actions */}
+        <div className="p-6 rounded-2xl glass-panel flex flex-col xl:flex-row items-start xl:items-center justify-between gap-4">
+          <div className="min-w-0 flex-1">
+            <h1 className="text-2xl font-bold text-white flex flex-wrap items-center gap-3">
               <span>{formattedTitle} ({year})</span>
-              <span className="px-2.5 py-1 rounded-lg text-xs font-black bg-neon-red text-white shadow-[0_0_10px_rgba(229,9,20,0.5)]">
-                {formatEpisodeTitle(currentEpName)}
+              <span className="inline-flex shrink-0 items-center justify-center whitespace-nowrap self-center px-2.5 py-1 leading-none rounded-lg text-xs font-black bg-neon-red text-white shadow-[0_0_10px_rgba(229,9,20,0.5)]">
+                {episodeLabel}
               </span>
             </h1>
             <p className="text-gray-400 text-xs sm:text-sm mt-1 font-mono">
@@ -360,7 +357,7 @@ const WatchPage = () => {
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex shrink-0 flex-wrap items-center gap-3">
             {/* UI Nút Lượt xem: hiển thị số Lượt xem đồng bộ toàn cầu (bắt đầu từ 0) */}
             <div 
               title={`Tổng lượt xem toàn cầu: ${viewsCount.toLocaleString()} lượt`}
@@ -426,18 +423,11 @@ const WatchPage = () => {
             >
               ▶ Play()
             </button>
-            <button 
-              type="button"
-              onClick={handleSeekForward}
-              className="px-3.5 py-2 rounded-xl bg-neon-cyan/20 hover:bg-neon-cyan/30 border border-neon-cyan/40 text-neon-cyan text-xs font-semibold transition-all cursor-pointer"
-            >
-              ⏩ +15s
-            </button>
           </div>
         </div>
 
-        {/* Episodes Selection Grid Component in Watch Page with Range Tabs (Max 100 per range) */}
-        <div className="p-6 rounded-2xl glass-panel space-y-4">
+        {/* Series episode selection (Max 100 per range). Movies have one full stream. */}
+        {!isMovie && <div className="p-6 rounded-2xl glass-panel space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <h3 className="text-base font-bold text-white flex items-center gap-2">
               <span className="w-1.5 h-4 bg-red-600 rounded-full"></span>
@@ -504,7 +494,7 @@ const WatchPage = () => {
                 );
               })}
           </div>
-        </div>
+        </div>}
       </main>
     </div>
   );

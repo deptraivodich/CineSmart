@@ -15,6 +15,7 @@ import {
 } from '../../services/interactionService';
 import { useAuth } from '../../contexts/AuthContext';
 import { formatVietnameseSentenceCase, generateSlug } from '../../utils/textUtils';
+import { isFeatureMovie } from '../../utils/movieFormat.js';
 import { uniqueMovies } from '../../utils/movieCatalogue.js';
 
 const HomePage = () => {
@@ -190,18 +191,21 @@ const HomePage = () => {
       .slice(0, 10);
   }, [favoritesLeaderboard, validAllMovies]);
 
+  const trendingSeriesMovies = useMemo(() => trendingRankedMovies.filter(movie => !isFeatureMovie(movie)), [trendingRankedMovies]);
+
   // Top 10 Phim Bộ Hôm Nay
   const top10Movies = useMemo(() => {
-    if (trendingRankedMovies.length > 0) {
-      return uniqueMovies(trendingRankedMovies).slice(0, 10);
+    if (trendingSeriesMovies.length > 0) {
+      return uniqueMovies(trendingSeriesMovies).slice(0, 10);
     }
     const fromLayout = layout?.top10Movies ? getSectionMovies(layout.top10Movies) : [];
-    return uniqueMovies(fromLayout.length > 0 ? fromLayout : validAllMovies).slice(0, 10);
-  }, [layout, getSectionMovies, validAllMovies, trendingRankedMovies]);
+    const series = fromLayout.filter(movie => !isFeatureMovie(movie));
+    return uniqueMovies(series.length > 0 ? series : validAllMovies.filter(movie => !isFeatureMovie(movie))).slice(0, 10);
+  }, [layout, getSectionMovies, validAllMovies, trendingSeriesMovies]);
 
   const cinemaMovies = useMemo(() => {
     const fromLayout = layout?.cinemaMovies ? getSectionMovies(layout.cinemaMovies) : [];
-    return fromLayout.length > 0 ? fromLayout : validAllMovies.slice(0, 6);
+    return uniqueMovies([...fromLayout, ...validAllMovies].filter(isFeatureMovie)).slice(0, 12);
   }, [layout, getSectionMovies, validAllMovies]);
 
   const animeVaultMovies = useMemo(() => {
@@ -478,7 +482,7 @@ const HomePage = () => {
               <div className="w-1.5 h-5 shrink-0 rounded-full bg-amber-400 shadow-[0_0_12px_#f59e0b]"></div>
               <h2 className="text-lg md:text-xl font-extrabold text-white flex flex-wrap items-center gap-2 min-w-0">
                 <span>Top 10 Phim Bộ Hôm Nay</span>
-                <span className="text-[10px] px-2 py-0.5 rounded bg-amber-400/20 text-amber-300 border border-amber-400/30">{trendingRankedMovies.length ? `${top10Movies.length} phim có lượt xem` : 'Khám phá kho phim'}</span>
+                <span className="text-[10px] px-2 py-0.5 rounded bg-amber-400/20 text-amber-300 border border-amber-400/30">{trendingSeriesMovies.length ? `${top10Movies.length} phim có lượt xem` : 'Khám phá kho phim'}</span>
               </h2>
             </div>
 
@@ -918,7 +922,7 @@ const HomePage = () => {
                           className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                         />
                         <span className="absolute bottom-1 right-1 text-[9px] px-1 rounded bg-black/80 text-pink-400 font-bold">
-                          {typeof anime?.episodes === 'string' ? anime.episodes : (Array.isArray(anime?.episodes) ? `${anime.episodes.length} Tập` : 'Tập 1')}
+                          {isFeatureMovie(anime) ? 'Movie' : typeof anime?.episodes === 'string' ? anime.episodes : (Array.isArray(anime?.episodes) ? `${anime.episodes.length} Tập` : 'Tập 1')}
                         </span>
                       </div>
                       <div className="flex-1 min-w-0">

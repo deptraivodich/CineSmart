@@ -1,7 +1,7 @@
 export default [
   { ignores: ['dist/**', '.build-anime-validation/**', 'node_modules/**', 'vite.config.js.timestamp-*'] },
   {
-    files: ['scripts/**/*.mjs', 'tests/**/*.mjs', 'api/**/*.js', 'server/**/*.js', 'src/utils/chatContext.js', 'src/utils/movieCatalogue.js', 'src/utils/cloudMovieSync.js', 'src/utils/movieImport.js', 'src/utils/MagicParser.js', 'src/utils/textUtils.js', 'src/services/phimApiImport.js', 'src/components/admin/MagicImport.jsx'],
+    files: ['scripts/**/*.mjs', 'tests/**/*.mjs', 'api/**/*.js', 'server/**/*.js', 'src/utils/chatContext.js', 'src/utils/movieCatalogue.js', 'src/utils/movieFormat.js', 'src/utils/cloudMovieSync.js', 'src/utils/movieImport.js', 'src/utils/MagicParser.js', 'src/utils/textUtils.js', 'src/services/phimApiImport.js', 'src/components/admin/MagicImport.jsx'],
     languageOptions: {
       ecmaVersion: 'latest', sourceType: 'module',
       parserOptions: { ecmaFeatures: { jsx: true } },

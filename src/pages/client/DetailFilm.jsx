@@ -10,6 +10,7 @@ import {
   addMovieComment 
 } from '../../services/interactionService';
 import { formatVietnameseSentenceCase, extractCleanEpisodeNumber, formatEpisodeTitle, deduplicateEpisodes } from '../../utils/textUtils';
+import { isFeatureMovie } from '../../utils/movieFormat.js';
 import { generateSlug } from '../../utils/slugUtils';
 
 const formatTimeAgo = (dateStr) => {
@@ -294,7 +295,7 @@ const DetailFilm = () => {
     year = '2024',
     ageRating = '16+',
     quality = '4K UltraHD',
-    duration = '120 phút',
+    duration = 'Đang cập nhật',
     episodesCount = 'Full Tập',
     badge = 'Vietsub + Thuyết Minh',
     director = 'Đang cập nhật',
@@ -305,6 +306,8 @@ const DetailFilm = () => {
   } = movieDetail;
 
   const movieSlug = generateSlug(title) || activeId;
+  const isMovie = isFeatureMovie(movieDetail);
+  const watchEpisode = isMovie ? episodes[0]?.number || 1 : selectedEpisode;
 
   return (
     <div className="min-h-screen bg-background text-white pb-24">
@@ -388,7 +391,7 @@ const DetailFilm = () => {
                     {duration}
                   </span>
                   <span className="px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                    {episodesCount}
+                    {isMovie ? 'Movie' : episodesCount}
                   </span>
                 </div>
 
@@ -418,11 +421,11 @@ const DetailFilm = () => {
                 <div className="flex flex-wrap items-center justify-center md:justify-start gap-4 pt-4">
                   {/* Big Prominent Highlighted 'Xem Ngay' Button with Dynamic Movie SEO Slug Route */}
                   <Link 
-                    to={`/movie/${movieSlug}/tap-${selectedEpisode}`}
+                    to={`/movie/${movieSlug}/tap-${watchEpisode}`}
                     className="px-8 py-3.5 rounded-xl bg-gradient-to-r from-yellow-400 via-amber-500 to-amber-600 hover:from-yellow-300 hover:to-amber-500 text-black font-extrabold text-sm sm:text-base flex items-center gap-2 shadow-[0_0_30px_rgba(251,191,36,0.6)] hover:scale-105 transition-all duration-300 cursor-pointer"
                   >
                     <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                    <span>XEM NGAY ({formatEpisodeTitle(selectedEpisode).toUpperCase()})</span>
+                    <span>{isMovie ? 'XEM NGAY' : `XEM NGAY (${formatEpisodeTitle(selectedEpisode).toUpperCase()})`}</span>
                   </Link>
 
                   {/* Circular Icon Buttons: Lượt xem, Yêu thích, Bình luận, Chia sẻ */}
@@ -483,8 +486,8 @@ const DetailFilm = () => {
               </div>
             </div>
 
-            {/* Episodes Selection Container (Khung chọn Tập phim Grid) */}
-            <div className="p-6 rounded-2xl bg-surface-card/90 border border-glass-border backdrop-blur-md space-y-4">
+            {/* Series episode selection; a Movie opens directly from Xem ngay. */}
+            {!isMovie && <div className="p-6 rounded-2xl bg-surface-card/90 border border-glass-border backdrop-blur-md space-y-4">
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-bold text-white flex items-center gap-2">
                   <span className="w-1.5 h-4 bg-neon-red rounded-full"></span>
@@ -511,7 +514,7 @@ const DetailFilm = () => {
                   </Link>
                 ))}
               </div>
-            </div>
+            </div>}
 
             {/* Comments Section */}
             <div id="comments-section" className="p-6 rounded-2xl bg-surface-card/90 border border-glass-border backdrop-blur-md space-y-6">
