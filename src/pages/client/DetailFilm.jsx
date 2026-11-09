@@ -3,28 +3,11 @@ import { useParams, Link } from 'react-router-dom';
 import Navbar from '../../components/common/Navbar';
 import { getMovies } from '../../services/movieService';
 import { getCurrentSession } from '../../services/authService';
-import { 
-  getMovieStats, 
-  toggleMovieLike, 
-  getMovieComments, 
-  addMovieComment 
-} from '../../services/interactionService';
+import { getMovieStats, toggleMovieLike } from '../../services/interactionService';
+import MovieComments from '../../components/ui/MovieComments';
 import { formatVietnameseSentenceCase, extractCleanEpisodeNumber, formatEpisodeTitle, deduplicateEpisodes } from '../../utils/textUtils';
 import { isFeatureMovie } from '../../utils/movieFormat.js';
 import { generateSlug } from '../../utils/slugUtils';
-
-const formatTimeAgo = (dateStr) => {
-  if (!dateStr) return 'Vừa xong';
-  try {
-    const diff = (Date.now() - new Date(dateStr).getTime()) / 1000;
-    if (diff < 60) return 'Vừa xong';
-    if (diff < 3600) return `${Math.floor(diff / 60)} phút trước`;
-    if (diff < 86400) return `${Math.floor(diff / 3600)} giờ trước`;
-    return `${Math.floor(diff / 86400)} ngày trước`;
-  } catch (e) {
-    return 'Gần đây';
-  }
-};
 
 // Fallback template when fetching detail
 const DEFAULT_FALLBACK_MOVIE = {
@@ -60,8 +43,6 @@ const DetailFilm = () => {
   const [isFavorite, setIsFavorite] = useState(false);
   const [viewsCount, setViewsCount] = useState(0);
   const [copied, setCopied] = useState(false);
-  const [comments, setComments] = useState([]); // Xóa bỏ hoàn toàn bình luận ảo (mock data)
-  const [newComment, setNewComment] = useState('');
 
   // Fetch & re-bind movie data whenever slug/id in URL changes
   useEffect(() => {
@@ -118,9 +99,6 @@ const DetailFilm = () => {
               setIsFavorite(stats.is_liked || false);
             }
           });
-          getMovieComments(found.id).then(cmts => {
-            setComments(cmts || []);
-          });
         } else if (moviesList && moviesList.length > 0) {
           const fallback = moviesList[0];
           const parsedEps = formatEpisodes(fallback.episodes, fallback.m3u8Url);
@@ -137,9 +115,6 @@ const DetailFilm = () => {
               setViewsCount(stats.views || 0);
               setIsFavorite(stats.is_liked || false);
             }
-          });
-          getMovieComments(fallback.id).then(cmts => {
-            setComments(cmts || []);
           });
         } else {
           setMovieDetail(DEFAULT_FALLBACK_MOVIE);
@@ -257,23 +232,6 @@ const DetailFilm = () => {
     const username = session?.username || 'anonymous';
     const res = await toggleMovieLike(movieDetail.id, username);
     setIsFavorite(res.is_liked);
-  };
-
-  const handleAddComment = async (e) => {
-    e.preventDefault();
-    if (!newComment.trim() || !movieDetail?.id) return;
-    const session = getCurrentSession();
-    const username = session?.displayName || session?.username || 'Khách';
-    const created = await addMovieComment(movieDetail.id, {
-      userId: session?.username || 'anonymous',
-      username: username,
-      avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100',
-      content: newComment.trim()
-    });
-    if (created) {
-      setComments(prev => [created, ...prev]);
-      setNewComment('');
-    }
   };
 
   if (isLoading || !movieDetail) {
@@ -516,60 +474,7 @@ const DetailFilm = () => {
               </div>
             </div>}
 
-            {/* Comments Section */}
-            <div id="comments-section" className="p-6 rounded-2xl bg-surface-card/90 border border-glass-border backdrop-blur-md space-y-6">
-              <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                <span className="w-1.5 h-4 bg-neon-cyan rounded-full"></span>
-                <span>Bình Luận & Đánh Giá ({comments.length})</span>
-              </h3>
-
-              {/* Comment Input Form */}
-              <form onSubmit={handleAddComment} className="flex gap-3">
-                <input 
-                  type="text" 
-                  placeholder="Viết nhận xét của bạn về phim..."
-                  value={newComment}
-                  onChange={(e) => setNewComment(e.target.value)}
-                  className="flex-1 py-3 px-4 rounded-xl bg-background/80 border border-glass-border text-xs text-gray-200 focus:outline-none focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan transition-all"
-                />
-                <button 
-                  type="submit"
-                  className="px-6 py-3 rounded-xl bg-neon-cyan/20 hover:bg-neon-cyan/30 text-neon-cyan border border-neon-cyan/40 text-xs font-bold transition-all cursor-pointer"
-                >
-                  Gửi
-                </button>
-              </form>
-
-              {/* Comment List (Real Comments with Intermediate Key Variable) */}
-              <div className="space-y-4">
-                {comments.length === 0 ? (
-                  <div className="py-6 text-center text-xs text-gray-400 bg-background/30 rounded-xl border border-white/5">
-                    Chưa có bình luận nào. Hãy là người đầu tiên bình luận về bộ phim này!
-                  </div>
-                ) : (
-                  comments.map((c, idx) => {
-                    const itemKey = `cmt-${c.id || idx}`;
-                    return (
-                      <div key={itemKey} className="flex items-start space-x-3 p-3.5 rounded-xl bg-background/40 border border-white/5">
-                        <img 
-                          src={c.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100'} 
-                          alt="Avatar" 
-                          onError={(e) => { e.target.src = 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100'; }}
-                          className="w-9 h-9 rounded-full object-cover border border-white/10 flex-shrink-0" 
-                        />
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center justify-between text-xs">
-                            <span className="font-bold text-gray-200">{c.username || c.user || 'Người dùng'}</span>
-                            <span className="text-gray-500 text-[10px]">{formatTimeAgo(c.created_at || c.time)}</span>
-                          </div>
-                          <p className="text-xs text-gray-300 mt-1 break-words">{c.content || c.text}</p>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </div>
+            <MovieComments movieId={String(activeId)} />
 
           </div>
 

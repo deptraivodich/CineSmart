@@ -1,6 +1,7 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { useParams, useSearchParams, Link, useNavigate } from 'react-router-dom';
 import VideoPlayer from '../../components/player/VideoPlayer';
+import MovieComments from '../../components/ui/MovieComments';
 import Navbar from '../../components/common/Navbar';
 import { getMovies } from '../../services/movieService';
 import { useAuth } from '../../contexts/AuthContext';
@@ -386,8 +387,8 @@ const WatchPage = () => {
             </button>
 
             {/* Nút Bình luận dẫn về trang chi tiết bình luận của phim */}
-            <Link 
-              to={`/movie/${movieSlug}#comments-section`}
+            <a
+              href="#comments-section"
               className="h-10 px-3.5 rounded-full bg-surface-card text-gray-300 hover:text-white border border-glass-border flex items-center gap-1.5 shadow-sm text-xs font-semibold transition-all hover:bg-white/10"
               title="Xem bình luận & đánh giá"
             >
@@ -395,7 +396,7 @@ const WatchPage = () => {
                 <path d="M21.99 4c0-1.1-.89-2-1.99-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h14l4 4-.01-18zM18 14H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z"/>
               </svg>
               <span>Bình luận</span>
-            </Link>
+            </a>
 
             {/* Nút Chia sẻ link phim */}
             <button 
@@ -495,6 +496,7 @@ const WatchPage = () => {
               })}
           </div>
         </div>}
+        <MovieComments movieId={String(activeId)} />
       </main>
     </div>
   );

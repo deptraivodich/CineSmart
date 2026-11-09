@@ -3,7 +3,7 @@ import { getAuth } from 'firebase-admin/auth';
 
 // Token verification uses Google's public signing keys. No private key is needed.
 const app = getApps().find(candidate => candidate.name === 'admin-api') || initializeApp({
-  projectId: 'loliphim-db',
+  projectId: process.env.VITE_FIREBASE_PROJECT_ID || 'loliphim-db',
 }, 'admin-api');
 
 export async function verifyAdminRequest(request) {
