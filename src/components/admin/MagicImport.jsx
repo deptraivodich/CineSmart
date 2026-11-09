@@ -5,6 +5,7 @@ import { collection, getDocsFromServer, doc, runTransaction } from 'firebase/fir
 import { findMovie, planImport, episodeKey, MOVIE_FIELDS, sourceMovieId } from '../../utils/movieImport.js';
 import { crawlManualUrl, detailsToTSV } from '../../services/phimApiImport.js';
 import { adminRequest, getAdminIdToken } from '../../services/adminSession';
+import KKPhimSearch from './KKPhimSearch';
 import { getMovies } from '../../services/movieService';
 
 const MagicImport = ({ readOnly = false }) => {
@@ -214,6 +215,7 @@ const MagicImport = ({ readOnly = false }) => {
 
   return (
     <div className="w-full space-y-6">
+      <KKPhimSearch readOnly={readOnly} />
       {/* Component Header & Actions */}
       <div className="glass-panel p-6 rounded-2xl space-y-4">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">

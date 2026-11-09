@@ -7,7 +7,6 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000
 
 const STORAGE_VIEWS_KEY = '210loliphim_global_movie_views';
 const STORAGE_LIKES_KEY = '210loliphim_user_movie_likes';
-const STORAGE_COMMENTS_KEY = '210loliphim_movie_comments';
 
 // Helper: Get cached views from localStorage
 const getLocalViews = () => {
@@ -40,24 +39,6 @@ const getLocalLikes = () => {
 const saveLocalLikes = (likesMap) => {
   try {
     localStorage.setItem(STORAGE_LIKES_KEY, JSON.stringify(likesMap));
-  } catch (e) {
-    // Ignore
-  }
-};
-
-// Helper: Get cached comments from localStorage
-const getLocalComments = () => {
-  try {
-    const raw = localStorage.getItem(STORAGE_COMMENTS_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch (e) {
-    return [];
-  }
-};
-
-const saveLocalComments = (commentsList) => {
-  try {
-    localStorage.setItem(STORAGE_COMMENTS_KEY, JSON.stringify(commentsList));
   } catch (e) {
     // Ignore
   }
@@ -117,7 +98,6 @@ export const getMovieStats = async (movieId, userId = 'anonymous') => {
     if (Array.isArray(arr) && arr.includes(cleanId)) totalLikesLocal++;
   });
 
-  const localComments = getLocalComments().filter(c => String(c.movie_id) === cleanId);
 
   try {
     const res = await fetch(`${API_BASE_URL}/api/movies/${encodeURIComponent(cleanId)}/stats?user_id=${encodeURIComponent(cleanUser)}`);
@@ -137,7 +117,7 @@ export const getMovieStats = async (movieId, userId = 'anonymous') => {
     views: localViews,
     likes_count: totalLikesLocal,
     is_liked: isLikedLocal,
-    comments_count: localComments.length
+    comments_count: null
   };
 };
 
@@ -282,91 +262,33 @@ export const getLeaderboardFavorites = async (limit = 10) => {
 /**
  * 7. BÌNH LUẬN MỚI NHẤT TOÀN CẦU (Bình luận thật, không mock data)
  */
+async function commentsRequest(url, options = {}) {
+  const response = await fetch(url, { ...options, signal: options.signal || AbortSignal.timeout(15000) });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'Không kết nối được dịch vụ bình luận.');
+  return data;
+}
+
 export const getRecentComments = async (limit = 10) => {
-  try {
-    const res = await fetch(`${API_BASE_URL}/api/comments/latest?limit=${limit}`);
-    if (res.ok) {
-      const data = await res.json();
-      if (Array.isArray(data.comments)) {
-        return data.comments;
-      }
-    }
-  } catch (err) {
-    // Fallback
-  }
-
-  const local = getLocalComments();
-  return local.slice(0, limit);
+  const data = await commentsRequest(`/api/comments?limit=${limit}`);
+  return data.comments;
 };
 
-/**
- * 8. LẤY BÌNH LUẬN CỦA 1 PHIM (GET /api/movies/:id/comments)
- */
-export const getMovieComments = async (movieId) => {
-  if (!movieId) return [];
-  const cleanId = String(movieId).trim();
-
-  try {
-    const res = await fetch(`${API_BASE_URL}/api/movies/${encodeURIComponent(cleanId)}/comments`);
-    if (res.ok) {
-      const data = await res.json();
-      if (Array.isArray(data.comments)) {
-        return data.comments;
-      }
-    }
-  } catch (err) {
-    // Fallback
-  }
-
-  const local = getLocalComments().filter(c => String(c.movie_id) === cleanId);
-  return local;
+export const getMovieCommentsPage = async (movieId, { cursor = '', signal } = {}) => {
+  const query = new URLSearchParams({ movieId: String(movieId), limit: '30' });
+  if (cursor) query.set('cursor', cursor);
+  return commentsRequest('/api/comments?' + query, { signal });
 };
 
-/**
- * 9. THÊM BÌNH LUẬN THẬT CHO PHIM (POST /api/movies/:id/comments)
- */
-export const addMovieComment = async (movieId, { userId = 'anonymous', username = 'Người dùng', avatar = '', content = '' }) => {
-  if (!movieId || !content.trim()) return null;
-  const cleanId = String(movieId).trim();
+export const getMovieComments = async movieId => (await getMovieCommentsPage(movieId)).comments;
 
-  const newCommentObj = {
-    id: `local_cmt_${Date.now()}`,
-    movie_id: cleanId,
-    user_id: userId,
-    username: username || 'Người dùng',
-    avatar: avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100',
-    content: content.trim(),
-    created_at: new Date().toISOString()
-  };
-
-  try {
-    const res = await fetch(`${API_BASE_URL}/api/movies/${encodeURIComponent(cleanId)}/comments`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        user_id: userId,
-        username: username,
-        avatar: avatar,
-        content: content.trim()
-      })
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data && data.comment) {
-        // Save to local cache
-        const local = getLocalComments();
-        saveLocalComments([data.comment, ...local]);
-        return data.comment;
-      }
-    }
-  } catch (err) {
-    console.warn('Backend comment fallback to local:', err.message);
-  }
-
-  // Local fallback
-  const local = getLocalComments();
-  saveLocalComments([newCommentObj, ...local]);
-  return newCommentObj;
+export const addMovieComment = async (movieId, { username, content, requestId = crypto.randomUUID() }) => {
+  const data = await commentsRequest('/api/comments', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ movieId: String(movieId), username, content, requestId }),
+  });
+  if (!data.comment?.id) throw new Error('Cloud chưa xác nhận lưu bình luận.');
+  return data.comment;
 };
 
 /**

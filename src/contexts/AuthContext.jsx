@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
-import { onIdTokenChanged } from 'firebase/auth';
-import { auth, googleProvider, signInWithPopup, signOut } from '../firebase';
+import { onIdTokenChanged, signInWithCustomToken } from 'firebase/auth';
+import { auth, signOut } from '../firebase';
 import { setAdminSessionUid } from '../services/adminSession';
 import {
   initAccounts,
@@ -27,14 +27,16 @@ export const AuthProvider = ({ children }) => {
   const [firebaseSession, setFirebaseSession] = useState(null);
   const [firebaseLoading, setFirebaseLoading] = useState(true);
   const authGeneration = useRef(0);
+  const authIntent = useRef('restore');
 
   useEffect(() => {
     let active = true;
     const unsubscribe = onIdTokenChanged(auth, async user => {
       const generation = authGeneration.current;
       try {
+        if (user && !['restore', user.uid].includes(authIntent.current)) return;
         const token = user ? await user.getIdTokenResult() : null;
-        if (!active || generation !== authGeneration.current || auth.currentUser !== user) return;
+        if (!active || generation !== authGeneration.current || auth.currentUser !== user || (user && !['restore', user.uid].includes(authIntent.current))) return;
         setAdminSessionUid(user?.emailVerified && token?.claims.admin === true ? user.uid : null);
         setFirebaseSession(user ? {
           user: { username: user.email, displayName: user.displayName || user.email, uid: user.uid },
@@ -78,42 +80,47 @@ export const AuthProvider = ({ children }) => {
     bootstrap();
   }, []);
 
-  // Login with username + password
+  // The Admin alias is verified by the server, then signs into the existing Firebase UID.
   const login = async (username, password) => {
     const generation = ++authGeneration.current;
+    authIntent.current = 'pending';
     setAdminSessionUid(null);
     setFirebaseSession(null);
-    await signOut(auth);
-    const session = await authLogin(username, password);
-    if (generation !== authGeneration.current) throw new Error('Phiên đăng nhập đã kết thúc.');
-    setCurrentUser({
-      username: session.username,
-      displayName: session.displayName,
-      age: session.age
-    });
-    setUserRole(session.role);
-    return session;
-  };
-
-  const loginAdminWithGoogle = async () => {
-    const generation = ++authGeneration.current;
-    const { user } = await signInWithPopup(auth, googleProvider);
-    const token = await user.getIdTokenResult(true);
-    if (generation !== authGeneration.current || auth.currentUser !== user) {
-      throw new Error('Phiên đăng nhập đã kết thúc.');
-    }
-    if (!user.emailVerified || token.claims.admin !== true) {
-      await signOut(auth);
-      throw new Error('Email Google này chưa được cấp quyền Admin.');
-    }
     authLogout();
     setCurrentUser(null);
     setUserRole('guest');
-    setAdminSessionUid(user.uid);
-    setFirebaseSession({
-      user: { username: user.email, displayName: user.displayName || user.email, uid: user.uid },
-      admin: true,
-    });
+    await signOut(auth);
+    if (generation !== authGeneration.current) throw new Error('Phiên đăng nhập đã kết thúc.');
+    if (username.trim().toLowerCase() === 'admin') {
+      let user;
+      try {
+        const response = await fetch('/api/admin/login', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password }), signal: AbortSignal.timeout(20000),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Không đăng nhập được Admin.');
+        if (generation !== authGeneration.current) throw new Error('Phiên đăng nhập đã kết thúc.');
+        ({ user } = await signInWithCustomToken(auth, result.customToken));
+        const token = await user.getIdTokenResult(true);
+        if (generation !== authGeneration.current || auth.currentUser !== user || !user.emailVerified || token.claims.admin !== true) throw new Error('Phiên Admin không còn hợp lệ.');
+        authIntent.current = user.uid;
+        setAdminSessionUid(user.uid);
+        const session = { username: user.email, displayName: user.displayName || 'Admin', uid: user.uid, role: 'admin' };
+        setFirebaseSession({ user: session, admin: true });
+        return session;
+      } catch (error) {
+        if (generation === authGeneration.current) authIntent.current = 'signed-out';
+        if (user && auth.currentUser === user) await signOut(auth);
+        throw error;
+      }
+    }
+    authIntent.current = 'signed-out';
+    const session = await authLogin(username, password, { isCurrent: () => generation === authGeneration.current });
+    if (generation !== authGeneration.current) throw new Error('Phiên đăng nhập đã kết thúc.');
+    setCurrentUser({ username: session.username, displayName: session.displayName, age: session.age });
+    setUserRole(session.role);
+    return session;
   };
 
   // Register new account
@@ -125,6 +132,7 @@ export const AuthProvider = ({ children }) => {
   // Logout
   const logout = () => {
     authGeneration.current++;
+    authIntent.current = 'signed-out';
     setAdminSessionUid(null);
     authLogout();
     setFirebaseSession(null);
@@ -142,7 +150,6 @@ export const AuthProvider = ({ children }) => {
     isAdmin: firebaseSession?.admin === true,
     isUser: effectiveRole === 'user' || effectiveRole === 'admin',
     login,
-    loginAdminWithGoogle,
     register,
     logout
   };

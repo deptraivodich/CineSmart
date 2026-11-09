@@ -68,7 +68,7 @@ const HomePage = () => {
       const [trendingData, favData, commentsData] = await Promise.all([
         getLeaderboardTrending(),
         getLeaderboardFavorites(),
-        getRecentComments(8)
+        getRecentComments(8).catch(() => [])
       ]);
 
       // Filter: Lượt xem phải >= 1 (tuyệt đối không chèn phim 0 view)

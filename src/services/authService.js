@@ -26,14 +26,6 @@ async function hashPassword(password) {
 // --- Default Seeded Accounts for LocalStorage Fallback ---
 const SEED_ACCOUNTS = [
   {
-    username: 'admin',
-    password: 'admin123',
-    role: 'admin',
-    age: 25,
-    displayName: '210LoliPhim Admin',
-    createdAt: '2025-01-01T00:00:00.000Z'
-  },
-  {
     username: 'khale',
     password: 'khale2k5kk',
     role: 'user',
@@ -88,7 +80,7 @@ export async function initAccounts() {
 }
 
 // --- LocalStorage Fallback Login ---
-async function fallbackLocalLogin(username, password) {
+async function fallbackLocalLogin(username, password, isCurrent = () => true) {
   await initAccounts();
   const accounts = getAccountsFromStorage() || [];
   const trimmedUsername = username.trim().toLowerCase();
@@ -111,6 +103,7 @@ async function fallbackLocalLogin(username, password) {
     role: account.role,
     age: account.age
   };
+  if (!isCurrent()) throw new Error('Phiên đăng nhập đã kết thúc.');
   localStorage.setItem(SESSION_KEY, JSON.stringify(session));
   return session;
 }
@@ -158,7 +151,7 @@ async function fallbackLocalRegister(username, age, password) {
 }
 
 // --- Public Login Function (Hybrid: API first -> Fallback LocalStorage) ---
-export async function login(username, password) {
+export async function login(username, password, { isCurrent = () => true } = {}) {
   try {
     const response = await fetch(`${API_BASE}/login`, {
       method: 'POST',
@@ -173,9 +166,11 @@ export async function login(username, password) {
     }
 
     const session = data.session;
+    if (!isCurrent()) throw new Error('Phiên đăng nhập đã kết thúc.');
     localStorage.setItem(SESSION_KEY, JSON.stringify(session));
     return session;
   } catch (error) {
+    if (!isCurrent()) throw new Error('Phiên đăng nhập đã kết thúc.');
     // Nếu là lỗi từ Backend (400/401), ném trực tiếp để hiển thị thông báo chính xác
     const knownErrors = [
       'Tên đăng nhập không tồn tại.',
@@ -188,12 +183,13 @@ export async function login(username, password) {
 
     // Nếu không kết nối được tới Backend (Server tắt / mạng lỗi), tự động fallback về LocalStorage
     console.warn('[AuthService] Backend API không phản hồi, tự động chuyển sang cơ chế LocalStorage:', error.message);
-    return fallbackLocalLogin(username, password);
+    return fallbackLocalLogin(username, password, isCurrent);
   }
 }
 
 // --- Public Register Function (Hybrid: API first -> Fallback LocalStorage) ---
 export async function register(username, age, password) {
+  if (username.trim().toLowerCase() === 'admin') throw new Error('Tên này dành cho tài khoản Admin.');
   try {
     const response = await fetch(`${API_BASE}/register`, {
       method: 'POST',

@@ -4,7 +4,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import dragonLogo from '../../assets/dragon-logo.png';
 
 const LoginPage = () => {
-  const { login, register, loginAdminWithGoogle } = useAuth();
+  const { login, register } = useAuth();
   const navigate = useNavigate();
 
   // Tab state: 'login' or 'register'
@@ -26,19 +26,6 @@ const LoginPage = () => {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  const handleGoogleAdminLogin = async () => {
-    setError('');
-    setIsSubmitting(true);
-    try {
-      await loginAdminWithGoogle();
-      navigate('/admin');
-    } catch (err) {
-      setError(err.code ? `Đăng nhập Google chưa hoàn tất (${err.code}).` : err.message);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
 
   // --- Login Handler ---
   const handleLogin = async (e) => {
@@ -194,15 +181,6 @@ const LoginPage = () => {
 
           {/* Form Content */}
           <div className="p-6 pt-4">
-            <button
-              type="button"
-              onClick={handleGoogleAdminLogin}
-              disabled={isSubmitting}
-              className="w-full mb-5 py-3 rounded-xl border border-cyan-400/40 text-cyan-200 font-bold text-sm disabled:opacity-50"
-            >
-              Đăng nhập Admin bằng Google
-            </button>
-
             {/* === LOGIN TAB === */}
             {activeTab === 'login' && (
               <form onSubmit={handleLogin} className="space-y-4 animate-[fadeIn_0.3s_ease]">
