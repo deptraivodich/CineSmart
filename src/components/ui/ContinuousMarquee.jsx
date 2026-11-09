@@ -24,6 +24,7 @@ const ContinuousMarquee = ({
   const safeId = rawId.replace(/[^a-zA-Z0-9_-]/g, '_');
 
   const containerRef = useRef(null);
+  const viewportRef = useRef(null);
   const trackRef = useRef(null);
   const set0Ref = useRef(null);
   const set1Ref = useRef(null);
@@ -33,6 +34,7 @@ const ContinuousMarquee = ({
   const [isMeasured, setIsMeasured] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [scrollEdges, setScrollEdges] = useState({ left: false, right: false });
 
   // Animation & Physics Refs
   const currentOffsetRef = useRef(0);
@@ -50,6 +52,29 @@ const ContinuousMarquee = ({
 
   const safeSpeed = speed > 0 ? speed : 30;
   const loopEnabled = loop && Array.isArray(items) && items.length >= 4;
+
+  // Only the viewport scrolls. Controls and edge fades stay in the outer frame.
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (loopEnabled || !viewport) return;
+
+    const updateEdges = () => {
+      const left = viewport.scrollLeft > 1;
+      const right = viewport.scrollLeft < viewport.scrollWidth - viewport.clientWidth - 1;
+      setScrollEdges(prev => prev.left === left && prev.right === right ? prev : { left, right });
+    };
+    updateEdges();
+    viewport.addEventListener('scroll', updateEdges, { passive: true });
+    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(updateEdges) : null;
+    observer?.observe(viewport);
+    if (set0Ref.current) observer?.observe(set0Ref.current);
+    window.addEventListener('resize', updateEdges);
+    return () => {
+      viewport.removeEventListener('scroll', updateEdges);
+      observer?.disconnect();
+      window.removeEventListener('resize', updateEdges);
+    };
+  }, [items, loopEnabled]);
 
   // Exact measurement of 1 full cycle (D), including the junction gap
   const measureCycle = useCallback(() => {
@@ -241,7 +266,7 @@ const ContinuousMarquee = ({
   // Fast-Forward Step by Arrow Buttons (~320px per click)
   const handleStep = (stepDir) => {
     if (!loopEnabled) {
-      containerRef.current?.scrollBy({ left: stepDir * 320, behavior: 'smooth' });
+      viewportRef.current?.scrollBy({ left: stepDir * 320, behavior: 'smooth' });
       return;
     }
     lastInteractionTimeRef.current = Date.now();
@@ -271,9 +296,7 @@ const ContinuousMarquee = ({
         handlePointerUp();
       }}
       onDragStart={(e) => e.preventDefault()}
-      className={`group/marquee relative w-full min-w-0 overflow-y-hidden py-8 -my-4 select-none ${
-        loopEnabled ? 'overflow-x-hidden touch-pan-y' : 'overflow-x-auto no-scrollbar'
-      } ${isDragging ? 'cursor-grabbing' : 'cursor-grab'} ${className}`}
+      className={`group/marquee relative w-full min-w-0 -my-4 select-none ${className}`}
     >
       {/* Edge Shadow Fades for Cinema Look */}
       <div className="absolute left-0 top-0 bottom-0 w-8 sm:w-16 bg-gradient-to-r from-[#0b0f19] to-transparent pointer-events-none z-20" />
@@ -283,7 +306,8 @@ const ContinuousMarquee = ({
       <button
         type="button"
         onClick={() => handleStep(-1)}
-        className="absolute left-1 sm:left-3 top-1/2 -translate-y-1/2 z-30 w-9 h-9 sm:w-11 sm:h-11 rounded-full bg-black/80 hover:bg-neon-cyan text-white hover:text-black border border-white/20 hover:border-neon-cyan backdrop-blur-md flex items-center justify-center transition-all duration-300 opacity-0 group-hover/marquee:opacity-100 hover:scale-110 shadow-[0_4px_20px_rgba(0,0,0,0.8)] cursor-pointer select-none active:scale-95"
+        disabled={!loopEnabled && !scrollEdges.left}
+        className="absolute left-1 sm:left-3 top-1/2 -translate-y-1/2 z-30 w-9 h-9 sm:w-11 sm:h-11 rounded-full bg-black/80 hover:bg-neon-cyan text-white hover:text-black border border-white/20 hover:border-neon-cyan backdrop-blur-md flex items-center justify-center transition-all duration-300 opacity-100 sm:opacity-0 group-hover/marquee:opacity-100 focus-visible:opacity-100 disabled:invisible hover:scale-110 shadow-[0_4px_20px_rgba(0,0,0,0.8)] cursor-pointer select-none active:scale-95"
         aria-label="Tua lùi"
         title="Tua lùi (Cuộn chuột hoặc bấm để lướt qua nhanh)"
       >
@@ -295,7 +319,8 @@ const ContinuousMarquee = ({
       <button
         type="button"
         onClick={() => handleStep(1)}
-        className="absolute right-1 sm:right-3 top-1/2 -translate-y-1/2 z-30 w-9 h-9 sm:w-11 sm:h-11 rounded-full bg-black/80 hover:bg-neon-cyan text-white hover:text-black border border-white/20 hover:border-neon-cyan backdrop-blur-md flex items-center justify-center transition-all duration-300 opacity-0 group-hover/marquee:opacity-100 hover:scale-110 shadow-[0_4px_20px_rgba(0,0,0,0.8)] cursor-pointer select-none active:scale-95"
+        disabled={!loopEnabled && !scrollEdges.right}
+        className="absolute right-1 sm:right-3 top-1/2 -translate-y-1/2 z-30 w-9 h-9 sm:w-11 sm:h-11 rounded-full bg-black/80 hover:bg-neon-cyan text-white hover:text-black border border-white/20 hover:border-neon-cyan backdrop-blur-md flex items-center justify-center transition-all duration-300 opacity-100 sm:opacity-0 group-hover/marquee:opacity-100 focus-visible:opacity-100 disabled:invisible hover:scale-110 shadow-[0_4px_20px_rgba(0,0,0,0.8)] cursor-pointer select-none active:scale-95"
         aria-label="Tua tới"
         title="Tua tới (Cuộn chuột hoặc bấm để lướt qua nhanh)"
       >
@@ -304,41 +329,51 @@ const ContinuousMarquee = ({
         </svg>
       </button>
 
-      {/* Marquee Track */}
       <div
-        ref={trackRef}
-        className={`flex flex-nowrap items-center ${gapClass} w-max will-change-transform`}
-        style={{
-          transform: loopEnabled ? `translate3d(${currentOffsetRef.current}px, 0, 0)` : undefined
-        }}
+        ref={viewportRef}
+        tabIndex={loopEnabled ? undefined : 0}
+        role="group"
+        aria-label="Danh sách phim"
+        className={`min-w-0 py-8 ${loopEnabled
+          ? `overflow-hidden touch-pan-y ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`
+          : 'overflow-x-auto overflow-y-hidden no-scrollbar'}`}
       >
-        {setsArray.map((_, setIdx) => {
-          const isClone = setIdx > 0;
-          const setKey = `marquee-set-${safeId}-${setIdx}`;
+        {/* Marquee Track */}
+        <div
+          ref={trackRef}
+          className={`flex flex-nowrap items-center ${gapClass} w-max will-change-transform`}
+          style={{
+            transform: loopEnabled ? `translate3d(${currentOffsetRef.current}px, 0, 0)` : undefined
+          }}
+        >
+          {setsArray.map((_, setIdx) => {
+            const isClone = setIdx > 0;
+            const setKey = `marquee-set-${safeId}-${setIdx}`;
 
-          // Attach refs to set 0 and set 1 to accurately measure D (including junction gap)
-          let setRefProp = null;
-          if (setIdx === 0) setRefProp = set0Ref;
-          else if (setIdx === 1) setRefProp = set1Ref;
+            // Attach refs to set 0 and set 1 to accurately measure D (including junction gap)
+            let setRefProp = null;
+            if (setIdx === 0) setRefProp = set0Ref;
+            else if (setIdx === 1) setRefProp = set1Ref;
 
-          return (
-            <div
-              key={setKey}
-              ref={setRefProp}
-              aria-hidden={isClone ? 'true' : undefined}
-              className={`flex flex-nowrap items-center ${gapClass} flex-shrink-0`}
-            >
-              {items.map((item, itemIdx) => {
-                const itemKey = `set-${setIdx}-item-${item.id || itemIdx}`;
-                return (
-                  <div key={itemKey} className="flex-shrink-0">
-                    {renderItem(item, itemIdx, isClone)}
-                  </div>
-                );
-              })}
-            </div>
-          );
-        })}
+            return (
+              <div
+                key={setKey}
+                ref={setRefProp}
+                aria-hidden={isClone ? 'true' : undefined}
+                className={`flex flex-nowrap items-center ${gapClass} flex-shrink-0`}
+              >
+                {items.map((item, itemIdx) => {
+                  const itemKey = `set-${setIdx}-item-${item.id || itemIdx}`;
+                  return (
+                    <div key={itemKey} className="flex-shrink-0">
+                      {renderItem(item, itemIdx, isClone)}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
