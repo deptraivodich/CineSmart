@@ -20,11 +20,20 @@ const VideoPlayer = forwardRef(({
   onTimeUpdate,
   onPlay,
   onPause,
+  hasPrevEpisode = false,
+  hasNextEpisode = false,
+  onPrevEpisode,
+  onNextEpisode,
   className = "" 
 }, ref) => {
   const artRef = useRef(null);
   const artInstanceRef = useRef(null);
   const hlsInstanceRef = useRef(null);
+  const epActionsRef = useRef({ hasPrevEpisode, hasNextEpisode, onPrevEpisode, onNextEpisode });
+
+  useEffect(() => {
+    epActionsRef.current = { hasPrevEpisode, hasNextEpisode, onPrevEpisode, onNextEpisode };
+  }, [hasPrevEpisode, hasNextEpisode, onPrevEpisode, onNextEpisode]);
 
   // Expose imperative handle methods for parent components
   useImperativeHandle(ref, () => ({
@@ -103,11 +112,11 @@ const VideoPlayer = forwardRef(({
           position: 'left',
           index: 10,
           html: `
-            <button class="art-icon flex items-center justify-center text-white hover:text-[#e50914] transition-colors" title="Lùi 10 giây">
-              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <button class="art-icon !w-auto px-1.5 gap-0.5 whitespace-nowrap flex items-center justify-center text-white hover:text-[#e50914] transition-colors" title="Lùi 10 giây">
+              <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0019 16V8a1 1 0 00-1.6-.8l-5.334 4zM4.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0011 16V8a1 1 0 00-1.6-.8l-5.334 4z"/>
               </svg>
-              <span class="text-[10px] font-bold ml-[-2px]">-10s</span>
+              <span class="text-[11px] font-bold leading-none">-10s</span>
             </button>
           `,
           click: function () {
@@ -115,21 +124,55 @@ const VideoPlayer = forwardRef(({
           },
         },
         {
-          name: 'forward-10',
+          name: 'forward-90',
           position: 'left',
           index: 11,
           html: `
-            <button class="art-icon flex items-center justify-center text-white hover:text-[#e50914] transition-colors" title="Tua 10 giây">
-              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <button class="art-icon !w-auto px-1.5 gap-0.5 whitespace-nowrap flex items-center justify-center text-white hover:text-[#e50914] transition-colors" title="Tua 1 phút 30 giây (Skip Intro)">
+              <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11.934 12.8a1 1 0 000-1.6l-5.334-4A1 1 0 005 8v8a1 1 0 001.6.8l5.334-4zM19.934 12.8a1 1 0 000-1.6l-5.334-4A1 1 0 0013 8v8a1 1 0 001.6.8l5.334-4z"/>
               </svg>
-              <span class="text-[10px] font-bold ml-[-2px]">+10s</span>
+              <span class="text-[11px] font-bold leading-none">+1'30s</span>
             </button>
           `,
           click: function () {
-            art.currentTime = art.currentTime + 10;
+            art.currentTime = art.currentTime + 90;
           },
         },
+        ...(onPrevEpisode ? [{
+          name: 'prev-episode',
+          position: 'right',
+          index: 1,
+          html: `
+            <button class="art-icon flex items-center justify-center transition-colors ${hasPrevEpisode ? 'text-white hover:text-[#e50914]' : 'text-white/35 cursor-not-allowed'}" title="Lùi lại tập trước">
+              <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/>
+              </svg>
+            </button>
+          `,
+          click: function () {
+            if (epActionsRef.current.hasPrevEpisode && epActionsRef.current.onPrevEpisode) {
+              epActionsRef.current.onPrevEpisode();
+            }
+          },
+        }] : []),
+        ...(onNextEpisode ? [{
+          name: 'next-episode',
+          position: 'right',
+          index: 2,
+          html: `
+            <button class="art-icon flex items-center justify-center transition-colors ${hasNextEpisode ? 'text-white hover:text-[#e50914]' : 'text-white/35 cursor-not-allowed'}" title="Qua tập tiếp theo">
+              <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/>
+              </svg>
+            </button>
+          `,
+          click: function () {
+            if (epActionsRef.current.hasNextEpisode && epActionsRef.current.onNextEpisode) {
+              epActionsRef.current.onNextEpisode();
+            }
+          },
+        }] : []),
       ],
 
       // Custom Hls.js loader integration
@@ -246,7 +289,20 @@ const VideoPlayer = forwardRef(({
 
     artInstanceRef.current = art;
 
+    // Keyboard '>' or ArrowRight always seeks forward +10s
+    const handleKeyDown = (e) => {
+      const tag = document.activeElement?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement?.isContentEditable) return;
+      if (e.key === '>' || e.key === 'ArrowRight') {
+        e.preventDefault();
+        e.stopPropagation();
+        art.currentTime = art.currentTime + 10;
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown, { capture: true });
+
     return () => {
+      window.removeEventListener('keydown', handleKeyDown, { capture: true });
       if (artInstanceRef.current && artInstanceRef.current.destroy) {
         artInstanceRef.current.destroy(true);
       }

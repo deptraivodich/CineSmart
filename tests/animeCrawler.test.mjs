@@ -8,7 +8,10 @@ import { generateKeyPairSync } from 'node:crypto';
 import { checkAnimeSource } from '../scripts/checkAnimeSource.mjs';
 import { main, options } from '../scripts/crawlDailyAnime.mjs';
 import { completedDailySync, isFirestoreQuotaError, nextQuotaReset, readFirestore } from '../scripts/lib/firestoreRecovery.mjs';
-import { normalizePhimApiMovie, isJapaneseAnimation, findMovie, planImport, episodeKey, movieToTSV } from '../src/utils/movieImport.js';
+import { normalizePhimApiMovie, isJapaneseAnimation, isSupportedAnimation, findMovie, planImport, episodeKey, movieToTSV } from '../src/utils/movieImport.js';
+import { MAL_GENRES, mapGenresToMal } from '../src/utils/malGenres.js';
+import { findBestMalMatch, extractMalGenres, createMalGenreLookup } from '../scripts/lib/malApi.mjs';
+import { syncAllMovieGenres } from '../scripts/syncMalGenres.mjs';
 import { parseTSV } from '../src/utils/MagicParser.js';
 import { detailsToTSV, crawlManualUrl } from '../src/services/phimApiImport.js';
 import { MemoryFirestore } from './memoryFirestore.mjs';
@@ -34,13 +37,18 @@ function response(status, body, retryAfter) {
   return { status, ok: status >= 200 && status < 300, headers: { get: () => retryAfter || null }, async json() { if (body instanceof Error) throw body; return body; } };
 }
 
-test('automatic options always pages 1-10; reject page 0, 11, fractions and reversed ranges', () => {
-  assert.deepEqual(options({ GITHUB_EVENT_NAME: 'schedule', CRAWLER_START_PAGE: '0', CRAWLER_END_PAGE: '11' }, []), { start: 1, end: 10, dryRun: true, mode: 'automatic' });
-  for (const args of [[0, 10], [1, 11], [2, 1], [1.5, 10]]) assert.throws(() => pageRange(...args));
-  for (let p = 1; p <= 10; p++) {
+test('automatic options always pages 1-2; reject page 0, 11, fractions and reversed ranges', () => {
+  assert.deepEqual(options({ GITHUB_EVENT_NAME: 'schedule', CRAWLER_START_PAGE: '0', CRAWLER_END_PAGE: '11' }, []), { start: 1, end: 2, dryRun: true, mode: 'automatic' });
+  for (const args of [[0, 2], [1, 11], [2, 1], [1.5, 2]]) assert.throws(() => pageRange(...args));
+  for (let p = 1; p <= 2; p++) {
     const u = new URL(listUrl(p));
     assert.equal(u.pathname, '/v1/api/danh-sach/hoat-hinh');
-    assert.deepEqual(Object.fromEntries(u.searchParams), { country: 'nhat-ban', sort_field: 'modified.time', sort_type: 'desc', page: String(p) });
+  const u1 = new URL(listUrl(1));
+  assert.equal(u1.pathname, '/v1/api/danh-sach/hoat-hinh');
+  assert.deepEqual(Object.fromEntries(u1.searchParams), { country: 'nhat-ban', sort_field: 'modified.time', sort_type: 'desc', page: '1' });
+  const u2 = new URL(listUrl(2));
+  assert.equal(u2.pathname, '/v1/api/danh-sach/hoat-hinh');
+  assert.deepEqual(Object.fromEntries(u2.searchParams), { country: 'trung-quoc', sort_field: 'modified.time', sort_type: 'desc', page: '1' });
   }
 });
 test('source validates real API-shaped list pagination and slug identities', async () => {
@@ -49,7 +57,7 @@ test('source validates real API-shaped list pagination and slug identities', asy
   await assert.rejects(s.page(2), /pagination mismatch/);
 });
 test('only Japanese animation details are imported; foreign, live-action and missing country excluded', async () => {
-  const foreign = detail('foreign'); foreign.movie.country = [{ slug: 'trung-quoc' }];
+  const foreign = detail('foreign'); foreign.movie.country = [{ slug: 'han-quoc' }]; assert.equal(isSupportedAnimation(detail('donghua', 1).movie), true);
   const live = detail('live'); live.movie.type = 'series';
   const missing = detail('missing'); delete missing.movie.country;
   assert.equal(isJapaneseAnimation(foreign.movie), false);
@@ -59,10 +67,10 @@ test('only Japanese animation details are imported; foreign, live-action and mis
   assert.equal(result.stats.new, 1);
   assert.equal([...db.data.keys()].filter(k => k.startsWith('movies/')).length, 1);
 });
-test('new document uses existing schema, lowercase collection and source status; all ten pages traversed once', async () => {
+test('new document uses existing schema, lowercase collection and source status; both daily pages traversed once', async () => {
   const db = new MemoryFirestore(), source = fixtureSource();
   const result = await run(db, source);
-  assert.deepEqual(source.calls.pages, [1,2,3,4,5,6,7,8,9,10]);
+  assert.deepEqual(source.calls.pages, [1, 2]);
   assert.deepEqual(source.calls.details, ['anime-one', 'anime-two']);
   assert.equal(result.stats.discovered, 2);
   const movie = db.data.get('movies/kkphim-anime-one');
@@ -322,14 +330,14 @@ test('HTML/invalid list status and malformed details fail visibly instead of sil
   assert.equal(second.status, 'completed_with_errors');
 });
 
-test('a full daily scan supersedes an interrupted manual subset and still visits pages 1-10', async () => {
+test('a full daily scan supersedes an interrupted manual subset and still visits pages 1-2', async () => {
   const db = new MemoryFirestore();
   const partial = await run(db, fixtureSource(), { start: 3, end: 5, shouldStop: () => true });
   assert.equal(partial.status, 'pending');
   const source = fixtureSource();
   const full = await run(db, source);
-  assert.equal(full.start, 1); assert.equal(full.end, 10);
-  assert.deepEqual(source.calls.pages, [1,2,3,4,5,6,7,8,9,10]);
+  assert.equal(full.start, 1); assert.equal(full.end, 2);
+  assert.deepEqual(source.calls.pages, [1, 2]);
   assert.equal(full.status, 'completed');
 });
 test('TSV parity holds with missing source metadata/current episode and a named special', () => {
@@ -409,10 +417,10 @@ test('Retry-After on the final HTTP attempt is retained instead of ignored', asy
   assert.equal(calls, 3);
 });
 
-test('source-only diagnostic checks all 10 pages and never duplicates a detail sample', async () => {
+test('source-only diagnostic checks all 2 pages and never duplicates a detail sample', async () => {
   const source = fixtureSource();
   const report = await checkAnimeSource({ source, log: noop });
-  assert.equal(report.pages.length, 10); assert.equal(report.uniqueMovies, 2);
+  assert.equal(report.pages.length, 2); assert.equal(report.uniqueMovies, 2);
   assert.equal(report.firestoreWrites, 0); assert.equal(report.details.length, 2);
   assert.deepEqual(source.calls.details, ['anime-one', 'anime-two']);
   await assert.rejects(checkAnimeSource({ source, log: noop, detailSamples: 0 }), /within 1-10/);
@@ -446,7 +454,7 @@ test('source-only diagnostic fails if list contents contradict the acknowledged 
   let calls = 0;
   await assert.rejects(checkAnimeSource({ log: noop, fetchImpl: async () => {
     calls++;
-    return response(200, { status: true, data: { params: { slug: 'hoat-hinh', filterCountry: ['nhat-ban'] }, items: [{ slug: 'foreign', type: 'hoathinh', country: [{ slug: 'trung-quoc' }] }] } });
+    return response(200, { status: true, data: { params: { slug: 'hoat-hinh', filterCountry: ['nhat-ban'] }, items: [{ slug: 'foreign', type: 'hoathinh', country: [{ slug: 'han-quoc' }] }] } });
   } }), /outside Japanese animation filter/);
   assert.equal(calls, 1);
 });
@@ -516,11 +524,11 @@ test('quota reset follows Pacific midnight across winter, summer and daylight-sa
   ]) assert.equal(new Date(nextQuotaReset(Date.parse(now))).toISOString(), reset);
 });
 
-test('recovery skips only a completed full ten-page sync from the same Vietnam calendar day', () => {
-  const job = { status: 'completed', start: 1, end: 10, stats: { pages: 10 }, finishedAt: '2026-11-07T22:30:00Z' };
+test('recovery skips only a completed full two-page sync from the same Vietnam calendar day', () => {
+  const job = { status: 'completed', start: 1, end: 2, stats: { pages: 2 }, finishedAt: '2026-11-07T22:30:00Z' };
   assert.equal(completedDailySync(job, Date.parse('2026-11-08T09:30:00Z')), true);
   assert.equal(completedDailySync(job, Date.parse('2026-11-08T18:30:00Z')), false);
-  for (const change of [{ status: 'pending' }, { status: 'completed_with_errors' }, { end: 1 }, { stats: { pages: 9 } }, { finishedAt: 'invalid' }]) {
+  for (const change of [{ status: 'pending' }, { status: 'completed_with_errors' }, { end: 1 }, { stats: { pages: 1 } }, { finishedAt: 'invalid' }]) {
     assert.equal(completedDailySync({ ...job, ...change }, Date.parse('2026-11-08T09:30:00Z')), false);
   }
 });
@@ -546,7 +554,7 @@ test('normal CLI entry defers exhausted quota before catalogue reads or source r
 
 test('normal scheduled entry skips the catalogue scan after an already completed daily run', async () => {
   const source = fixtureSource();
-  const job = { status: 'completed', start: 1, end: 10, stats: { pages: 10 }, finishedAt: '2026-11-07T22:30:00Z' };
+  const job = { status: 'completed', start: 1, end: 2, stats: { pages: 2 }, finishedAt: '2026-11-07T22:30:00Z' };
   const db = new MemoryFirestore({ 'crawlerJobs/dailyJapaneseAnime': job });
   db.collection = () => assert.fail('Completed recovery must not scan the catalogue');
   const result = await main({
@@ -574,7 +582,7 @@ test('quota during movie persistence preserves the committed cursor and resumes 
   const source = fixtureSource();
   const params = {
     env: { GITHUB_EVENT_NAME: 'schedule', CRAWLER_DRY_RUN: 'false', CRAWLER_WRITES_ENABLED: 'true' },
-    argv: [], source, now: () => Date.parse('2026-11-08T04:00:00Z'), log: noop,
+    argv: [], source, malLookup: null, now: () => Date.parse('2026-11-08T04:00:00Z'), log: noop,
     connect: async () => ({ db, close: async () => {} }),
   };
   assert.equal((await main(params)).status, 'deferred_firestore_quota');
@@ -597,4 +605,128 @@ test('normal CLI entry does not convert Firebase permission errors into quota de
       close: async () => {},
     }),
   }), error => error.code === 7);
+});
+
+
+test('MAL genre normalization maps KKPhim Vietnamese and deprecated tags to official MAL genres', () => {
+  assert.ok(MAL_GENRES.includes('Avant Garde'));
+  assert.ok(MAL_GENRES.includes('Isekai'));
+  assert.ok(MAL_GENRES.includes('Girls Love'));
+  assert.ok(MAL_GENRES.includes('Boys Love'));
+  assert.ok(!MAL_GENRES.includes('Dementia'));
+  assert.ok(!MAL_GENRES.includes('Yaoi'));
+  assert.deepEqual(
+    mapGenresToMal(['Hoạt Hình', 'Hành Động', 'Phiêu Lưu', 'Khoa Học', 'Tâm Lý', 'Movie', 'Dementia', 'Yuri']),
+    ['Action', 'Adventure', 'Sci-Fi', 'Drama', 'Avant Garde', 'Girls Love']
+  );
+});
+
+test('MAL candidate matching prefers exact title, year, season and format, and extracts all MAL tags', async () => {
+  const movie = {
+    title: 'Học viện siêu anh hùng: Nhiệm vụ giải cứu thế giới',
+    originalTitle: "My Hero Academia: World Heroes' Mission",
+    year: '2021',
+    duration: '105 phút',
+    episodes: [{ name: '1', url: 'https://cdn.example/1.m3u8' }],
+  };
+  const candidates = [
+    { mal_id: 31964, title: 'Boku no Hero Academia', title_english: 'My Hero Academia', type: 'TV', year: 2016, genres: [{ name: 'Action' }] },
+    {
+      mal_id: 44200,
+      title: 'Boku no Hero Academia the Movie 3: World Heroes\' Mission',
+      title_english: "My Hero Academia: World Heroes' Mission",
+      type: 'Movie',
+      year: 2021,
+      genres: [{ name: 'Action' }],
+      themes: [{ name: 'Super Power' }],
+      demographics: [{ name: 'Shounen' }],
+    },
+  ];
+  const best = findBestMalMatch(candidates, movie);
+  assert.equal(best.mal_id, 44200);
+  assert.deepEqual(extractMalGenres(best), ['Action', 'Super Power', 'Shounen']);
+
+  const lookup = createMalGenreLookup({
+    sleep: async () => {},
+    fetchImpl: async () => response(200, { data: candidates }),
+  });
+  const result = await lookup.lookupGenres(movie);
+  assert.deepEqual(result.genres, ['Action', 'Super Power', 'Shounen']);
+});
+
+test('crawler enriches new and legacy messy-genre movies with MAL genres while protecting future admin edits', async () => {
+  const legacyMovie = {
+    ...normalizePhimApiMovie(detail('anime-one')),
+    genres: ['Hoạt Hình', 'Hành Động', 'Phiêu Lưu'],
+    category: 'Hoạt Hình, Hành Động, Phiêu Lưu',
+    sourceSync: { country: 'Nhật Bản', director: 'Director', status: 'ongoing', episodeCurrent: 'Tập 2', episodesStatus: 'Tập 2' },
+  };
+  const db = new MemoryFirestore({ 'movies/kkphim-anime-one': legacyMovie });
+  const malLookup = {
+    async lookupGenres(movie) {
+      return movie.sourceSlug === 'anime-one'
+        ? { genres: ['Action', 'Adventure', 'Super Power', 'Shounen'] }
+        : { genres: ['Comedy', 'Slice of Life'] };
+    },
+  };
+  const first = await run(db, fixtureSource(), { malLookup });
+  assert.equal(first.stats.update, 1);
+  assert.equal(first.stats.new, 1);
+  const updated = db.data.get('movies/kkphim-anime-one');
+  assert.deepEqual(updated.genres, ['Action', 'Adventure', 'Super Power', 'Shounen']);
+  assert.equal(updated.category, 'Action, Adventure, Super Power, Shounen');
+
+  // Admin manually overrides genres; subsequent source sync preserves admin override
+  updated.genres = ['Action', 'Drama'];
+  updated.category = 'Action, Drama';
+  const second = await run(db, fixtureSource(), { malLookup });
+  assert.equal(second.stats.skip, 2);
+  assert.deepEqual(db.data.get('movies/kkphim-anime-one').genres, ['Action', 'Drama']);
+});
+
+test('syncAllMovieGenres cleans messy legacy genres across all existing Firestore movies', async () => {
+  const db = new MemoryFirestore({
+    'movies/m1': { title: 'Movie One', originalTitle: 'Naruto', genres: ['Hoạt Hình', 'Hành Động', 'Hài Hước'], category: 'Hoạt Hình, Hành Động, Hài Hước' },
+    'movies/m2': { title: 'Movie Two', originalTitle: 'Unknown Show', genres: ['Hoạt Hình', 'Tâm Lý'], category: 'Hoạt Hình, Tâm Lý' },
+  });
+  const malLookup = {
+    async lookupGenres(m) {
+      return m.originalTitle === 'Naruto' ? { genres: ['Action', 'Adventure', 'Martial Arts', 'Shounen'] } : null;
+    },
+  };
+  const stats = await syncAllMovieGenres({ db, malLookup, dryRun: false, log: noop });
+  assert.equal(stats.total, 2);
+  assert.equal(stats.updated, 2);
+  assert.equal(stats.malMatched, 1);
+  assert.equal(stats.fallbackMapped, 1);
+  assert.deepEqual(db.data.get('movies/m1').genres, ['Action', 'Adventure', 'Martial Arts', 'Shounen']);
+  assert.deepEqual(db.data.get('movies/m2').genres, ['Drama']);
+});
+
+
+test('multi-server episodes (Vietsub, Lồng Tiếng, Thuyết Minh) are crawled and merged without dropping primary episodes', () => {
+  const raw = detail('conan', 2);
+  raw.episodes = [
+    { server_name: '#Hà Nội (Vietsub)', server_data: [{ name: '1', link_m3u8: 'https://cdn.example/vs-1.m3u8' }, { name: '2', link_m3u8: 'https://cdn.example/vs-2.m3u8' }] },
+    { server_name: '#Hà Nội (Lồng Tiếng)', server_data: [{ name: '1', link_m3u8: 'https://cdn.example/lt-1.m3u8' }] },
+    { server_name: '#Hà Nội (Thuyết Minh)', server_data: [{ name: '1', link_m3u8: 'https://cdn.example/tm-1.m3u8' }] },
+  ];
+  const normalized = normalizePhimApiMovie(raw);
+  assert.equal(normalized.servers.length, 3);
+  assert.deepEqual(normalized.servers.map(s => s.name), ['Vietsub', 'Lồng Tiếng', 'Thuyết Minh']);
+  assert.equal(normalized.episodes.length, 2);
+  assert.equal(normalized.episodes[0].url, 'https://cdn.example/vs-1.m3u8');
+
+  const first = planImport(null, normalized, 't1').data;
+  assert.equal(first.servers.length, 3);
+
+  const updatedRaw = detail('conan', 2);
+  updatedRaw.episodes = [
+    raw.episodes[0],
+    { server_name: '#Hà Nội (Lồng Tiếng)', server_data: [{ name: '1', link_m3u8: 'https://cdn.example/lt-1.m3u8' }, { name: '2', link_m3u8: 'https://cdn.example/lt-2.m3u8' }] },
+    raw.episodes[2],
+  ];
+  const update = planImport(first, normalizePhimApiMovie(updatedRaw), 't2');
+  assert.equal(update.action, 'update');
+  assert.equal(update.data.servers.find(s => s.name === 'Lồng Tiếng').episodes.length, 2);
 });

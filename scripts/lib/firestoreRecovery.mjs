@@ -28,7 +28,7 @@ export function nextQuotaReset(now = Date.now()) {
 }
 
 export function completedDailySync(job, now = Date.now()) {
-  if (job?.status !== 'completed' || job.start !== 1 || job.end !== 10 || job.stats?.pages !== 10) return false;
+  if (job?.status !== 'completed' || job.start !== 1 || job.end !== 2 || job.stats?.pages !== 2) return false;
   const finished = Date.parse(job.finishedAt);
   if (!Number.isFinite(finished)) return false;
   const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit', day: '2-digit' });

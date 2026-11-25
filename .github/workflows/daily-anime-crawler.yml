@@ -14,13 +14,13 @@ on:
         type: boolean
         default: true
       start_page:
-        description: 'First page (1-10); resume an unfinished job using its original range'
+        description: 'First page (1-2); resume an unfinished job using its original range'
         type: number
         default: 1
       end_page:
-        description: 'Last page (1-10)'
+        description: 'Last page (1-2)'
         type: number
-        default: 10
+        default: 2
 
 permissions:
   contents: read

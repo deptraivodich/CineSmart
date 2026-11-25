@@ -1,6 +1,7 @@
 import { appendFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { createSource, pageRange } from './lib/phimApi.mjs';
+import { createMalGenreLookup } from './lib/malApi.mjs';
 import { runAnimeSync } from './lib/animeRunner.mjs';
 import { connectFirestore, firestoreStore } from './lib/firestoreStore.mjs';
 import { completedDailySync, isFirestoreQuotaError, nextQuotaReset, readFirestore } from './lib/firestoreRecovery.mjs';
@@ -8,7 +9,7 @@ import { completedDailySync, isFirestoreQuotaError, nextQuotaReset, readFirestor
 export function options(env = process.env, argv = process.argv.slice(2)) {
   const automatic = env.GITHUB_EVENT_NAME === 'schedule';
   const start = automatic ? 1 : Number(env.CRAWLER_START_PAGE || 1);
-  const end = automatic ? 10 : Number(env.CRAWLER_END_PAGE || 10);
+  const end = automatic ? 2 : Number(env.CRAWLER_END_PAGE || 2);
   pageRange(start, end);
   // Only the literal false requests writes. Missing/mistyped configuration stays read-only.
   const dryRun = argv.includes('--dry-run') || env.CRAWLER_DRY_RUN !== 'false';
@@ -32,6 +33,7 @@ export async function main({
   argv = process.argv.slice(2),
   connect = connectFirestore,
   source = createSource(),
+  malLookup = createMalGenreLookup(),
   now = Date.now,
   sleep,
   log = console.log,
@@ -46,16 +48,16 @@ export async function main({
     const checkpoint = await readFirestore(() => connection.db.doc('crawlerJobs/dailyJapaneseAnime').get(), { sleep });
     const previous = checkpoint.data();
     if (!settings.dryRun && settings.mode === 'automatic' && completedDailySync(previous, now())) {
-      await writeReport(`CineSmart Japanese anime sync\nStatus: already_completed_today\nFull pages 1-10 sync finished at ${previous.finishedAt}\nMovies changed in this recovery invocation: 0`, env, log);
+      await writeReport(`CineSmart Japanese anime sync\nStatus: already_completed_today\nFull pages 1-2 sync finished at ${previous.finishedAt}\nMovies changed in this recovery invocation: 0`, env, log);
       return { status: 'already_completed_today' };
     }
     const store = await firestoreStore(connection.db, { ...settings, now });
-    const job = await runAnimeSync({ ...settings, store, source, now, log, shouldStop: () => stopping });
+    const job = await runAnimeSync({ ...settings, store, source, malLookup, now, log, shouldStop: () => stopping });
     const report = [
       'CineSmart Japanese anime sync',
       'Mode: ' + (settings.dryRun ? 'dry-run (no Firestore writes)' : settings.mode),
       'Status: ' + job.status, 'Started: ' + job.startedAt, 'Finished: ' + (job.finishedAt || 'pending/resumable'),
-      'Pages checked: ' + job.stats.pages + '/' + (job.end - job.start + 1) + ' (daily total: 10)',
+      'Pages checked: ' + job.stats.pages + '/' + (job.end - job.start + 1) + ' (daily total: 2)',
       'Discovered: ' + job.stats.discovered, 'New movies: ' + job.stats.new, 'Updated movies: ' + job.stats.update,
       'Unchanged: ' + job.stats.skip, 'Filtered: ' + job.stats.filtered, 'New episodes: ' + job.stats.episodes,
       'Failed movies: ' + job.failures.length, 'Error attempts: ' + job.stats.errors,

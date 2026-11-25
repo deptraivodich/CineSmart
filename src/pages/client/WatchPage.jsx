@@ -1,7 +1,9 @@
-import React, { useRef, useState, useEffect, useCallback } from 'react';
+import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useSearchParams, Link, useNavigate } from 'react-router-dom';
 import VideoPlayer from '../../components/player/VideoPlayer';
 import MovieComments from '../../components/ui/MovieComments';
+import EpisodeSelector from '../../components/ui/EpisodeSelector';
+import RelatedMoviesSidebar from '../../components/ui/RelatedMoviesSidebar';
 import Navbar from '../../components/common/Navbar';
 import { getMovies } from '../../services/movieService';
 import { useAuth } from '../../contexts/AuthContext';
@@ -12,7 +14,7 @@ import {
   formatDurationToMinutesSeconds 
 } from '../../services/historyService';
 import { formatVietnameseSentenceCase, extractCleanEpisodeNumber, formatEpisodeTitle, deduplicateEpisodes } from '../../utils/textUtils';
-import { isFeatureMovie } from '../../utils/movieFormat.js';
+import { isFeatureMovie, getRelatedMovies } from '../../utils/movieFormat.js';
 import { generateSlug } from '../../utils/slugUtils';
 import { trackEvent } from '../../services/telemetryService';
 import { recordMovieView, getMovieStats, toggleMovieLike } from '../../services/interactionService';
@@ -30,8 +32,10 @@ const WatchPage = () => {
   const lastSavedTimeRef = useRef(0);
   const viewedMovieIdRef = useRef(null); // Ref track phim đã tăng view chưa trong phiên
   const [currentMovie, setCurrentMovie] = useState(null);
+  const [allMovies, setAllMovies] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [activeEpisodeState, setActiveEpisodeState] = useState(episodeParam);
+  const [activeServerName, setActiveServerName] = useState(searchParams.get('server') || '');
   const [resumePrompt, setResumePrompt] = useState(null); // { savedTime: number, formattedTime: string }
   const [viewsCount, setViewsCount] = useState(0);
   const [isFavorite, setIsFavorite] = useState(false);
@@ -48,6 +52,7 @@ const WatchPage = () => {
 
       try {
         const moviesList = await getMovies();
+        setAllMovies(Array.isArray(moviesList) ? moviesList : []);
         const found = (moviesList || []).find(m => 
           generateSlug(m.title) === targetSlug || 
           String(m.id) === String(targetSlug) ||
@@ -91,8 +96,24 @@ const WatchPage = () => {
     window.scrollTo(0, 0);
   }, [targetSlug, currentUser?.username]);
 
-  // Resolve episodes list safely and deduplicate
-  const movieEpisodesList = currentMovie?.episodes || [];
+  // Resolve servers & episodes list safely and deduplicate
+  const movieServers = useMemo(() => {
+    if (Array.isArray(currentMovie?.servers) && currentMovie.servers.length > 0) {
+      return currentMovie.servers.map(s => ({
+        ...s,
+        episodes: deduplicateEpisodes(s.episodes || []),
+      })).filter(s => s.episodes.length > 0);
+    }
+    return null;
+  }, [currentMovie]);
+
+  const resolvedServerName = activeServerName && movieServers?.some(s => s.name === activeServerName)
+    ? activeServerName
+    : (movieServers?.find(s => s.name === 'Vietsub')?.name || movieServers?.[0]?.name || 'Vietsub');
+
+  const movieEpisodesList = movieServers
+    ? (movieServers.find(s => s.name === resolvedServerName)?.episodes || [])
+    : (currentMovie?.episodes || []);
   const rawEpisodes = Array.isArray(movieEpisodesList) && movieEpisodesList.length > 0
     ? movieEpisodesList
     : [{ name: '1', url: currentMovie?.m3u8Url || 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8' }];
@@ -109,24 +130,18 @@ const WatchPage = () => {
   const isMovie = isFeatureMovie(currentMovie);
   const episodeLabel = isMovie ? 'Full' : formatEpisodeTitle(currentEpName);
 
-  // Episode Pagination / Chunking (Max 100 episodes per range tab)
-  const CHUNK_SIZE = 100;
-  const totalEpisodesCount = episodes.length;
-  const chunkCount = Math.ceil(totalEpisodesCount / CHUNK_SIZE);
   const activeEpIndex = episodes.findIndex(ep => {
     const epNameStr = String(ep.name || ep.number || '');
     const cleanEpName = epNameStr.replace(/^tap-?/i, '');
     return epNameStr === String(currentEpName) || cleanEpName === String(currentEpName).replace(/^tap-?/i, '');
   });
-  const activeChunkIndex = activeEpIndex >= 0 ? Math.floor(activeEpIndex / CHUNK_SIZE) : 0;
 
-  const [selectedRangeIndex, setSelectedRangeIndex] = useState(activeChunkIndex);
-
-  useEffect(() => {
-    if (activeEpIndex >= 0) {
-      setSelectedRangeIndex(Math.floor(activeEpIndex / CHUNK_SIZE));
-    }
-  }, [activeEpIndex, currentMovie?.id]);
+  const prevEpisodeObj = activeEpIndex > 0 ? episodes[activeEpIndex - 1] : null;
+  const nextEpisodeObj = activeEpIndex >= 0 && activeEpIndex < episodes.length - 1 ? episodes[activeEpIndex + 1] : null;
+  const relatedMovies = useMemo(
+    () => getRelatedMovies(allMovies, currentMovie, 10),
+    [allMovies, currentMovie]
+  );
 
   // Check saved progress and show resume dialog if user previously stopped mid-video
   useEffect(() => {
@@ -247,7 +262,8 @@ const WatchPage = () => {
     const cleanNum = String(epNum).replace(/^tap-?/i, '');
     setActiveEpisodeState(cleanNum);
     const movieSlug = generateSlug(currentMovie?.title || '') || targetSlug;
-    navigate(`/movie/${movieSlug}/tap-${cleanNum}`);
+    const serverSuffix = movieServers && movieServers.length > 1 ? `?server=${encodeURIComponent(resolvedServerName)}` : '';
+    navigate(`/movie/${movieSlug}/tap-${cleanNum}${serverSuffix}`);
   };
 
   if (isLoading || !currentMovie) {
@@ -272,7 +288,7 @@ const WatchPage = () => {
 
   return (
     <div className="min-h-screen bg-background text-white pb-20">
-      <main className="pt-24 px-4 md:px-12 max-w-7xl mx-auto space-y-6">
+      <main className="pt-20 px-4 md:px-8 max-w-7xl mx-auto space-y-5">
         {/* Breadcrumb Navigation */}
         <div className="flex items-center space-x-2 text-sm text-gray-400">
           <Link to="/" className="hover:text-neon-red transition-colors">Trang chủ</Link>
@@ -281,6 +297,10 @@ const WatchPage = () => {
           <span>/</span>
           <span className="text-amber-400 font-bold">{episodeLabel}</span>
         </div>
+
+        {/* 2-Column AnimeVietsub Layout: Left = Player + Info + Episodes, Right = Related Movies */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          <div className="lg:col-span-8 space-y-5 min-w-0">
 
         {/* Resume Watching Prompt Dialog Overlay */}
         {resumePrompt && (
@@ -341,6 +361,20 @@ const WatchPage = () => {
             onTimeUpdate={handleTimeUpdate}
             onPlay={handleVideoPlay}
             onPause={handleVideoPause}
+            hasPrevEpisode={!isMovie && Boolean(prevEpisodeObj)}
+            hasNextEpisode={!isMovie && Boolean(nextEpisodeObj)}
+            onPrevEpisode={() => {
+              if (prevEpisodeObj) {
+                const epNum = extractCleanEpisodeNumber(prevEpisodeObj.name || prevEpisodeObj.number, activeEpIndex);
+                handleSelectEpisode(epNum);
+              }
+            }}
+            onNextEpisode={() => {
+              if (nextEpisodeObj) {
+                const epNum = extractCleanEpisodeNumber(nextEpisodeObj.name || nextEpisodeObj.number, activeEpIndex + 2);
+                handleSelectEpisode(epNum);
+              }
+            }}
           />
         </div>
 
@@ -440,63 +474,28 @@ const WatchPage = () => {
             <span className="text-xs text-neon-cyan font-semibold">Click tập bất kỳ để chuyển luồng phát ngay lập tức</span>
           </div>
 
-          {/* Episode Range Selector Tabs (Show if > 100 episodes) */}
-          {chunkCount > 1 && (
-            <div className="flex flex-wrap gap-2.5 pt-2 pb-3 border-b border-white/10">
-              {Array.from({ length: chunkCount }).map((_, chunkIdx) => {
-                const chunkTabKey = `chunk-range-tab-${chunkIdx}`;
-                const startEp = chunkIdx * CHUNK_SIZE + 1;
-                const endEp = Math.min(totalEpisodesCount, (chunkIdx + 1) * CHUNK_SIZE);
-                const isSelectedRange = selectedRangeIndex === chunkIdx;
-
-                return (
-                  <button
-                    key={chunkTabKey}
-                    type="button"
-                    onClick={() => setSelectedRangeIndex(chunkIdx)}
-                    className={`px-4 py-2 rounded-xl text-xs font-black transition-all border cursor-pointer ${
-                      isSelectedRange
-                        ? 'bg-red-600 text-white border-red-500 shadow-[0_0_15px_rgba(225,29,72,0.6)] scale-105'
-                        : 'bg-surface/80 text-gray-300 hover:text-white border-white/10 hover:border-white/30 hover:bg-white/10'
-                    }`}
-                  >
-                    {startEp} - {endEp}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-
-          {/* Episode Grid for Selected Range */}
-          <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 xl:grid-cols-12 gap-2.5">
-            {episodes
-              .slice(selectedRangeIndex * CHUNK_SIZE, (selectedRangeIndex + 1) * CHUNK_SIZE)
-              .map((ep, idxInChunk) => {
-                const globalIndex = selectedRangeIndex * CHUNK_SIZE + idxInChunk;
-                const epKey = `watch-ep-btn-${ep.id || globalIndex}-${globalIndex}`;
-                const rawEpNum = ep.name || ep.number || (globalIndex + 1);
-                const epNum = extractCleanEpisodeNumber(rawEpNum, globalIndex + 1);
-                const isActive = String(epNum) === String(currentEpName);
-
-                return (
-                  <button
-                    key={epKey}
-                    type="button"
-                    onClick={() => handleSelectEpisode(epNum)}
-                    className={`py-3 px-2 rounded-xl text-center text-xs font-bold transition-all border cursor-pointer flex flex-col items-center justify-center gap-0.5 ${
-                      isActive
-                        ? 'bg-red-600 text-white border-red-500 shadow-[0_0_15px_rgba(225,29,72,0.6)] scale-105 font-black'
-                        : 'bg-surface/80 text-gray-300 hover:text-white border-white/10 hover:border-red-500/50 hover:bg-white/10'
-                    }`}
-                  >
-                    <span className="text-[10px] opacity-75 font-normal">Tập</span>
-                    <span className="text-sm font-black">{epNum}</span>
-                  </button>
-                );
-              })}
-          </div>
+          <EpisodeSelector
+            episodes={episodes}
+            servers={movieServers || []}
+            activeServerName={resolvedServerName}
+            onSelectServer={(name) => {
+              setActiveServerName(name);
+              const nextParams = new URLSearchParams(searchParams);
+              nextParams.set('server', name);
+              setSearchParams(nextParams, { replace: true });
+            }}
+            activeEpisode={currentEpName}
+            onSelectEpisode={(epNum) => handleSelectEpisode(epNum)}
+          />
         </div>}
         <MovieComments movieId={String(activeId)} />
+          </div>
+
+          {/* Right Column: Phim Liên Quan */}
+          <aside className="lg:col-span-4 space-y-4">
+            <RelatedMoviesSidebar movies={relatedMovies} />
+          </aside>
+        </div>
       </main>
     </div>
   );

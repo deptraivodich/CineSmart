@@ -7,6 +7,7 @@ import HomepageCMS from '../../components/admin/HomepageCMS';
 import AutoSyncModal from '../../components/admin/AutoSyncModal';
 import dragonLogo from '../../assets/dragon-logo.png';
 import { ANIME_GENRES } from '../../components/common/Navbar';
+import { createMalGenreLookup, mapGenresToMal, isMalGenreList } from '../../utils/malGenres';
 import { formatVietnameseSentenceCase, extractCleanEpisodeNumber, formatEpisodeTitle, deduplicateEpisodes } from '../../utils/textUtils';
 
 /**
@@ -227,6 +228,7 @@ const MovieManagementPage = ({ readOnly = false }) => {
 
   // Cloud Sync State
   const [isSyncing, setIsSyncing] = useState(false);
+  const [malSyncProgress, setMalSyncProgress] = useState(null);
   // Auto-Sync Modal State
   const [isAutoSyncModalOpen, setIsAutoSyncModalOpen] = useState(false);
   const [isAutoCrawling, setIsAutoCrawling] = useState(false);
@@ -444,6 +446,56 @@ const MovieManagementPage = ({ readOnly = false }) => {
     }
   };
 
+  // Batch normalize legacy/non-MAL genres via MyAnimeList (Jikan) & Admin updateMovie
+  const handleNormalizeAllGenresFromMal = async () => {
+    if (readOnly || isSyncing || malSyncProgress) return;
+    const targets = movies.filter(m => !isMalGenreList(getGenresArray(m)));
+    if (!targets.length) {
+      showToast('success', 'Tất cả phim hiện tại đều đã có thể loại chuẩn MyAnimeList!');
+      return;
+    }
+
+    const malLookup = createMalGenreLookup({ delayMs: 400 });
+    let updatedCount = 0;
+    let malMatchedCount = 0;
+    let failedCount = 0;
+
+    setMalSyncProgress({ current: 0, total: targets.length });
+    try {
+      for (let i = 0; i < targets.length; i++) {
+        const movie = targets[i];
+        setMalSyncProgress({ current: i + 1, total: targets.length });
+        try {
+          const oldGenres = getGenresArray(movie);
+          const malRes = await malLookup.lookupGenres(movie);
+          let nextGenres = malRes?.genres?.length ? malRes.genres : mapGenresToMal(oldGenres);
+          if (malRes?.genres?.length) malMatchedCount++;
+
+          const nextCategory = nextGenres.join(', ');
+          const changed = JSON.stringify(oldGenres) !== JSON.stringify(nextGenres);
+          if (changed) {
+            await updateMovie(movie.id, {
+              genres: nextGenres,
+              category: nextCategory,
+            });
+            updatedCount++;
+            setMovies(prev => prev.map(item => (
+              item.id === movie.id ? { ...item, genres: nextGenres, category: nextCategory } : item
+            )));
+          }
+        } catch {
+          failedCount++;
+        }
+      }
+      showToast(
+        failedCount ? 'info' : 'success',
+        `Đã chuẩn hóa ${updatedCount}/${targets.length} phim (${malMatchedCount} khớp MyAnimeList)${failedCount ? `, ${failedCount} lỗi` : ''}.`
+      );
+    } finally {
+      setMalSyncProgress(null);
+    }
+  };
+
   // DELETE: Instant Optimistic Confirm Delete Action
   const handleConfirmDelete = async () => {
     if (readOnly) return;
@@ -561,6 +613,15 @@ const MovieManagementPage = ({ readOnly = false }) => {
               title="Kích hoạt bảng điều khiển Cào Phim Tự Động & Live Sync Log"
             >
               <span>⚡ Cào Phim Tự Động</span>
+            </button>
+            <button 
+              type="button"
+              onClick={handleNormalizeAllGenresFromMal}
+              disabled={readOnly || isSyncing || Boolean(malSyncProgress)}
+              className="px-3.5 py-2 rounded-lg text-xs font-black bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-white shadow-lg flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+              title="Ánh xạ & cập nhật thể loại chuẩn MyAnimeList cho các phim có thể loại cũ/sai"
+            >
+              <span>{malSyncProgress ? `⏳ MAL (${malSyncProgress.current}/${malSyncProgress.total})` : '🏷️ Chuẩn hóa Thể loại MAL'}</span>
             </button>
             <button 
               type="button"

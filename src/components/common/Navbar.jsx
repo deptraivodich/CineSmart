@@ -6,57 +6,18 @@ import Secret210Modal from '../ui/Secret210Modal';
 import dragonLogo from '../../assets/dragon-logo.png';
 import meoDenLogo from '../../assets/meo_den.png';
 
-// Standard Anime & Film Genres list (Sorted A-Z)
-export const ANIME_GENRES = [
-  'Action',
-  'Adventure',
-  'Boys Love',
-  'Cartoon',
-  'Cổ Trang',
-  'Comedy',
-  'Dementia',
-  'Demons',
-  'Drama',
-  'Ecchi',
-  'Fantasy',
-  'Game',
-  'Harem',
-  'Historical',
-  'Horror',
-  'Josei',
-  'Kids',
-  'Live Action',
-  'Magic',
-  'Martial Arts',
-  'Mecha',
-  'Military',
-  'Movie',
-  'Music',
-  'Mystery',
-  'Parody',
-  'Police',
-  'Psychological',
-  'Romance',
-  'Samurai',
-  'School',
-  'Sci-Fi',
-  'Seinen',
-  'Shoujo',
-  'Shoujo Ai',
-  'Shounen',
-  'Shounen Ai',
-  'Slice of Life',
-  'Space',
-  'Sports',
-  'Super Power',
-  'Supernatural',
-  'Suspense',
-  'Thriller',
-  'Tokusatsu',
-  'Vampire',
-  'Yaoi',
-  'Yuri'
-];
+import { MAL_GENRES, getGenreDescription } from '../../utils/malGenres';
+
+// Official MyAnimeList Anime Genres, Explicit Genres, Themes & Demographics (Sorted A-Z)
+export const ANIME_GENRES = MAL_GENRES;
+
+// AnimeVietsub-style Season list (2026 down to 2023)
+export const ANIME_SEASONS = [2026, 2025, 2024, 2023].flatMap(year => [
+  { label: `Mùa Đông ${year}`, season: 'dong', year },
+  { label: `Mùa Xuân ${year}`, season: 'xuan', year },
+  { label: `Mùa Hạ ${year}`, season: 'ha', year },
+  { label: `Mùa Thu ${year}`, season: 'thu', year },
+]);
 
 const Navbar = () => {
   const { currentUser, userRole, logout } = useAuth();
@@ -65,6 +26,8 @@ const Navbar = () => {
   const [isSecret210Open, setIsSecret210Open] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedGenres, setSelectedGenres] = useState([]);
+  const [drawerSection, setDrawerSection] = useState(null); // null | 'genres' | 'season'
+  const [activeDescGenre, setActiveDescGenre] = useState('Action');
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -187,21 +150,6 @@ const Navbar = () => {
               </svg>
             </button>
 
-            {/* 1. Button Thể Loại */}
-            <button
-              type="button"
-              onClick={() => setMenuOpen(!menuOpen)}
-              className="hidden md:flex px-3 sm:px-3.5 py-1.5 rounded-full bg-[#283056] hover:bg-[#323c6d] text-white text-xs font-bold border border-white/15 transition-all items-center space-x-1.5 cursor-pointer shadow-sm"
-            >
-              <span>🎭</span>
-              <span className="hidden xs:inline">Thể Loại</span>
-              {selectedGenres.length > 0 && (
-                <span className="px-1.5 py-0.2 rounded-full bg-amber-400 text-black text-[10px] font-black ml-0.5">
-                  {selectedGenres.length}
-                </span>
-              )}
-            </button>
-
             {/* 2. Admin Dashboard Quick Link Button (If Admin) */}
             {userRole === 'admin' && (
               <Link
@@ -294,73 +242,121 @@ const Navbar = () => {
                 <span>{currentUser ? (currentUser.displayName || currentUser.username || 'User') : 'Đăng nhập'}</span>
               </Link>
 
-              {/* 2. MỤC THỂ LOẠI (MULTI-SELECT 3 CỘT) */}
-              <div className="space-y-3 pt-2 border-t border-white/10">
-                <div className="flex items-center justify-between font-extrabold text-sm text-amber-300">
-                  <span className="flex items-center gap-1.5">
-                    <span>🎭</span> Chọn Đa Thể Loại
-                  </span>
-                  <div className="flex items-center space-x-2 text-[10px]">
+              {/* 2. COMPACT NAVIGATION GRID (Thể loại ▾, Movie, Season ▾) */}
+              <div className="pt-2 border-t border-white/10 space-y-3">
+                <div className="grid grid-cols-2 gap-2.5 text-sm font-bold">
+                  <button
+                    type="button"
+                    onClick={() => setDrawerSection(drawerSection === 'genres' ? null : 'genres')}
+                    className={`flex items-center justify-between px-3 py-2.5 rounded-xl transition-all cursor-pointer ${
+                      drawerSection === 'genres'
+                        ? 'bg-amber-400/20 text-amber-300 border border-amber-400/40'
+                        : 'bg-[#23294a] text-gray-100 hover:bg-white/10 border border-white/10'
+                    }`}
+                  >
+                    <span>🎭 Thể loại</span>
+                    <span className="text-xs">{drawerSection === 'genres' ? '▴' : '▾'}</span>
+                  </button>
+
+                  <Link
+                    to="/the-loai?type=movie"
+                    onClick={() => setMenuOpen(false)}
+                    className="flex items-center justify-between px-3 py-2.5 rounded-xl bg-[#23294a] text-gray-100 hover:bg-white/10 border border-white/10 transition-all"
+                  >
+                    <span>🎬 Movie</span>
+                  </Link>
+
+                  <button
+                    type="button"
+                    onClick={() => setDrawerSection(drawerSection === 'season' ? null : 'season')}
+                    className={`col-span-2 flex items-center justify-between px-3 py-2.5 rounded-xl transition-all cursor-pointer ${
+                      drawerSection === 'season'
+                        ? 'bg-amber-400/20 text-amber-300 border border-amber-400/40'
+                        : 'bg-[#23294a] text-gray-100 hover:bg-white/10 border border-white/10'
+                    }`}
+                  >
+                    <span>🗓️ Season (Anime theo mùa)</span>
+                    <span className="text-xs">{drawerSection === 'season' ? '▴' : '▾'}</span>
+                  </button>
+                </div>
+
+                {/* Expandable Season Grid (AnimeVietsub style) */}
+                {drawerSection === 'season' && (
+                  <div className="p-3 rounded-xl bg-[#1a203d] border border-white/10 grid grid-cols-2 gap-1.5 max-h-60 overflow-y-auto custom-scrollbar">
+                    {ANIME_SEASONS.map((item) => (
+                      <Link
+                        key={`${item.season}-${item.year}`}
+                        to={`/the-loai?season=${item.season}&year=${item.year}`}
+                        onClick={() => setMenuOpen(false)}
+                        className="px-2.5 py-2 rounded-lg text-xs font-semibold text-gray-200 hover:bg-amber-400/20 hover:text-amber-300 transition-colors"
+                      >
+                        {item.label}
+                      </Link>
+                    ))}
+                  </div>
+                )}
+
+                {/* Expandable Multi-Select Genres Grid + Short Description */}
+                {drawerSection === 'genres' && (
+                  <div className="space-y-2.5 p-3 rounded-xl bg-[#1a203d] border border-white/10">
+                    <div className="flex items-center justify-between font-extrabold text-xs text-amber-300">
+                      <span>Đã chọn: {selectedGenres.length}</span>
+                      <div className="flex items-center space-x-2 text-[10px]">
+                        <button type="button" onClick={selectAllGenres} className="hover:underline text-gray-300 font-bold cursor-pointer">
+                          Tất cả
+                        </button>
+                        <span>•</span>
+                        <button type="button" onClick={clearAllGenres} className="hover:underline text-red-400 font-bold cursor-pointer">
+                          Xóa
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Short Genre Description Preview */}
+                    <p className="text-[11px] text-amber-200/90 bg-black/25 px-2.5 py-1.5 rounded-lg border border-amber-400/20 leading-snug">
+                      💡 <strong>{activeDescGenre}:</strong> {getGenreDescription(activeDescGenre)}
+                    </p>
+
+                    <div className="grid grid-cols-3 gap-1.5 max-h-52 overflow-y-auto custom-scrollbar pr-1">
+                      {ANIME_GENRES.map((genre, idx) => {
+                        const isSelected = selectedGenres.includes(genre);
+                        return (
+                          <button
+                            type="button"
+                            key={idx}
+                            onMouseEnter={() => setActiveDescGenre(genre)}
+                            onClick={() => { setActiveDescGenre(genre); toggleGenre(genre); }}
+                            className={`px-2 py-2 rounded-lg border text-center truncate transition-all text-[11px] cursor-pointer ${isSelected
+                                ? 'bg-amber-400 text-black border-amber-400 font-black shadow-[0_0_10px_rgba(245,158,11,0.5)] scale-[1.02]'
+                                : 'bg-[#23294a] text-gray-200 border-white/10 hover:bg-white/10 hover:text-white font-medium'
+                              }`}
+                            title={`${genre}: ${getGenreDescription(genre)}`}
+                          >
+                            {isSelected ? `✓ ${genre}` : genre}
+                          </button>
+                        );
+                      })}
+                    </div>
+
                     <button
                       type="button"
-                      onClick={selectAllGenres}
-                      className="hover:underline text-gray-300 font-bold cursor-pointer"
+                      onClick={handleFilterSubmit}
+                      className="w-full py-2.5 rounded-xl bg-gradient-to-r from-amber-400 to-orange-500 hover:from-amber-300 hover:to-orange-400 text-black font-black text-xs uppercase tracking-wider shadow-[0_0_15px_rgba(245,158,11,0.5)] transition-all cursor-pointer flex items-center justify-center space-x-2"
                     >
-                      Tất cả
-                    </button>
-                    <span>•</span>
-                    <button
-                      type="button"
-                      onClick={clearAllGenres}
-                      className="hover:underline text-red-400 font-bold cursor-pointer"
-                    >
-                      Xóa
+                      <span>🚀 Lọc Phim</span>
+                      {selectedGenres.length > 0 && (
+                        <span className="px-2 py-0.5 rounded-full bg-black/20 text-black font-extrabold text-[10px]">
+                          {selectedGenres.length} thể loại
+                        </span>
+                      )}
                     </button>
                   </div>
-                </div>
-
-                <p className="text-[10px] text-gray-300">
-                  Click chọn nhiều thể loại (đã chọn: <strong className="text-amber-300">{selectedGenres.length}</strong>)
-                </p>
-
-                {/* 46 Genre Buttons Grid with toggle active state */}
-                <div className="grid grid-cols-3 gap-1.5 max-h-60 overflow-y-auto custom-scrollbar pr-1">
-                  {ANIME_GENRES.map((genre, idx) => {
-                    const isSelected = selectedGenres.includes(genre);
-                    return (
-                      <button
-                        type="button"
-                        key={idx}
-                        onClick={() => toggleGenre(genre)}
-                        className={`px-2 py-2 rounded-lg border text-center truncate transition-all text-[11px] cursor-pointer ${isSelected
-                            ? 'bg-amber-400 text-black border-amber-400 font-black shadow-[0_0_10px_rgba(245,158,11,0.5)] scale-[1.02]'
-                            : 'bg-[#23294a] text-gray-200 border-white/10 hover:bg-white/10 hover:text-white font-medium'
-                          }`}
-                        title={genre}
-                      >
-                        {isSelected ? `✓ ${genre}` : genre}
-                      </button>
-                    );
-                  })}
-                </div>
+                )}
               </div>
             </div>
 
             {/* Sticky Actions Bar at the bottom of the drawer */}
             <div className="space-y-3 pt-3 border-t border-white/10">
-              {/* Filter Submit Button */}
-              <button
-                type="button"
-                onClick={handleFilterSubmit}
-                className="w-full py-3 rounded-xl bg-gradient-to-r from-amber-400 to-orange-500 hover:from-amber-300 hover:to-orange-400 text-black font-black text-xs uppercase tracking-wider shadow-[0_0_15px_rgba(245,158,11,0.5)] transition-all cursor-pointer flex items-center justify-center space-x-2"
-              >
-                <span>🚀 Lọc Phim</span>
-                {selectedGenres.length > 0 && (
-                  <span className="px-2 py-0.5 rounded-full bg-black/20 text-black font-extrabold text-[10px]">
-                    {selectedGenres.length} thể loại
-                  </span>
-                )}
-              </button>
 
               {currentUser && (
                 <div className="text-center pt-1 space-y-3">

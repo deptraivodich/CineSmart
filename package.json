@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "test:crawler": "node --test tests/*.test.mjs",
     "crawl:anime": "node scripts/crawlDailyAnime.mjs",
-    "check:anime-source": "node scripts/checkAnimeSource.mjs"
+    "check:anime-source": "node scripts/checkAnimeSource.mjs",
+    "sync:mal-genres": "node --env-file-if-exists=.env scripts/syncMalGenres.mjs"
   },
   "dependencies": {
     "artplayer": "^5.1.7",

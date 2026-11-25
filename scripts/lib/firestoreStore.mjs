@@ -58,7 +58,7 @@ export async function firestoreStore(db, { dryRun = false, now = Date.now } = {}
         if (old?.resumeAt > now()) return { ...old, status: 'pending' };
         const pending = old && ['running', 'pending'].includes(old.status);
         // A full scan covers all unfinished work in an interrupted manual subset.
-        const promoteToFullScan = pending && start === 1 && end === 10 && (old.start !== 1 || old.end !== 10);
+        const promoteToFullScan = pending && start === 1 && end === 2 && (old.start !== 1 || old.end !== 2);
         const active = pending && !promoteToFullScan;
         if (active && (old.start !== start || old.end !== end)) throw new Error('Resume the pending page range before choosing a different range');
         const next = active ? { ...old } : newJob(start, end, now());

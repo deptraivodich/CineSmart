@@ -4,12 +4,15 @@ export class SourceError extends Error {
     Object.assign(this, { retryable, blocked, retryAt, status, providerCode, requestId });
   }
 }
-export function pageRange(start = 1, end = 10) {
+export function pageRange(start = 1, end = 2) {
   if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end > 10 || start > end) throw new Error('Pages must be integers within 1-10');
   return { start, end };
 }
 export function listUrl(page) {
   pageRange(page, page);
+  if (page === 2) {
+    return 'https://phimapi.com/v1/api/danh-sach/hoat-hinh?country=trung-quoc&sort_field=modified.time&sort_type=desc&page=1';
+  }
   return `https://phimapi.com/v1/api/danh-sach/hoat-hinh?country=nhat-ban&sort_field=modified.time&sort_type=desc&page=${page}`;
 }
 export function detailUrl(slug) {

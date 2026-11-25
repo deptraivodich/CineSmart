@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { isJapaneseAnimation, normalizePhimApiMovie } from '../../src/utils/movieImport.js';
+import { isSupportedAnimation, normalizePhimApiMovie } from '../../src/utils/movieImport.js';
 import { pageRange, SourceError } from './phimApi.mjs';
 
 export const LEASE_MS = 5 * 60000;
@@ -15,7 +15,7 @@ export function addResult(job, result) {
 }
 
 // store.commit checkpoints a movie write and cursor/counters atomically.
-export async function runAnimeSync({ store, source, start = 1, end = 10, dryRun = false, mode = 'manual', now = Date.now, budgetMs = 18 * 60000, log = console.log, shouldStop = () => false }) {
+export async function runAnimeSync({ store, source, malLookup = null, start = 1, end = 2, dryRun = false, mode = 'manual', now = Date.now, budgetMs = 18 * 60000, log = console.log, shouldStop = () => false }) {
   pageRange(start, end);
   let job = await store.acquire({ start, end, dryRun, now: now() });
   const started = now();
@@ -29,7 +29,7 @@ export async function runAnimeSync({ store, source, start = 1, end = 10, dryRun 
       const detail = await source.detail(slug);
       if (detail?.status !== true || !detail.movie || !Array.isArray(detail.episodes)) throw new SourceError('Invalid movie detail JSON', { retryable: true });
       if (detail.movie.slug !== slug) throw new SourceError('Detail slug does not match requested identity');
-      if (!isJapaneseAnimation(detail.movie)) {
+      if (!isSupportedAnimation(detail.movie)) {
         job.stats.filtered++;
         job.failures = job.failures.filter(f => f.slug !== slug);
         await save(); log(`[FILTER] ${slug}`); return;
@@ -37,6 +37,15 @@ export async function runAnimeSync({ store, source, start = 1, end = 10, dryRun 
       let movie;
       try { movie = normalizePhimApiMovie(detail); }
       catch { throw new SourceError('Malformed movie metadata', { retryable: true }); }
+      if (malLookup) {
+        const malResult = await malLookup.lookupGenres(movie).catch(() => null);
+        if (malResult?.genres?.length) {
+          movie.genres = malResult.genres;
+          movie.category = malResult.genres.join(', ');
+        }
+        if (malResult?.animeSeason) movie.animeSeason = malResult.animeSeason;
+        if (malResult?.animeSeasonYear) movie.animeSeasonYear = malResult.animeSeasonYear;
+      }
       job.failures = job.failures.filter(f => f.slug !== slug);
       await save(movie);
       log(`[${job.lastResult.action.toUpperCase()}] ${movie.title} (+${job.lastResult.added} episodes)`);
@@ -65,7 +74,7 @@ export async function runAnimeSync({ store, source, start = 1, end = 10, dryRun 
     while (job.page <= job.end) {
       if (outOfTime()) return await pause();
       if (job.items === null) {
-        log(`[Page ${job.page}/10] Fetching movies...`);
+        log(`[Page ${job.page}/${job.end}] Fetching movies...`);
         try { job.items = await source.page(job.page); }
         catch (error) {
           job.pageAttempts++;

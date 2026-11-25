@@ -5,8 +5,10 @@ import { getMovies } from '../../services/movieService';
 import { getCurrentSession } from '../../services/authService';
 import { getMovieStats, toggleMovieLike } from '../../services/interactionService';
 import MovieComments from '../../components/ui/MovieComments';
+import EpisodeSelector from '../../components/ui/EpisodeSelector';
+import RelatedMoviesSidebar from '../../components/ui/RelatedMoviesSidebar';
 import { formatVietnameseSentenceCase, extractCleanEpisodeNumber, formatEpisodeTitle, deduplicateEpisodes } from '../../utils/textUtils';
-import { isFeatureMovie } from '../../utils/movieFormat.js';
+import { isFeatureMovie, getRelatedMovies } from '../../utils/movieFormat.js';
 import { generateSlug } from '../../utils/slugUtils';
 
 // Fallback template when fetching detail
@@ -40,6 +42,7 @@ const DetailFilm = () => {
   const [allMovies, setAllMovies] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedEpisode, setSelectedEpisode] = useState(1);
+  const [activeServerName, setActiveServerName] = useState('');
   const [isFavorite, setIsFavorite] = useState(false);
   const [viewsCount, setViewsCount] = useState(0);
   const [copied, setCopied] = useState(false);
@@ -132,93 +135,10 @@ const DetailFilm = () => {
   }, [targetSlug]);
 
   // Thuật toán 'Phim Liên Quan' (Tối đa 10 phim)
-  const relatedMovies = useMemo(() => {
-    if (!movieDetail || !allMovies || allMovies.length === 0) return [];
-
-    const currentId = String(movieDetail.id);
-    const currentTitle = movieDetail.title || '';
-    const currentGenres = Array.isArray(movieDetail.genres) 
-      ? movieDetail.genres.map(g => String(g).trim().toLowerCase()) 
-      : String(movieDetail.genres || '').split(/[,;/|]+/).map(g => g.trim().toLowerCase()).filter(Boolean);
-
-    // Chuẩn hóa tên phim để tìm chuỗi tên gốc (bỏ "phần X", "season X", "part X", số tập...)
-    const getCleanRootTitle = (t) => {
-      if (!t) return '';
-      return String(t)
-        .toLowerCase()
-        .normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[đĐ]/g, 'd')
-        .replace(/[\(\[\{]?(phan|season|ss|part|tap|movie|ova)[\s\d:–\-]+[\)\]\}]?/gi, '')
-        .replace(/[\(\[\{][^\)\]\}]*[\)\]\}]/g, '')
-        .replace(/\s+\d+$/, '')
-        .replace(/[^a-z0-9\s]/g, ' ')
-        .trim();
-    };
-
-    const currentRoot = getCleanRootTitle(currentTitle);
-
-    // Lọc bỏ phim hiện tại
-    const candidateMovies = allMovies.filter(m => m && String(m.id) !== currentId);
-
-    // Logic ưu tiên 1: Cùng chuỗi tên (trùng tiền tố / hậu tố / cùng franchise)
-    const priority1Movies = [];
-    const addedIds = new Set();
-
-    if (currentRoot.length >= 3) {
-      candidateMovies.forEach(m => {
-        const otherRoot = getCleanRootTitle(m.title || '');
-        if (otherRoot.length >= 3) {
-          const isSameRoot = otherRoot === currentRoot;
-          const isPrefixOrSuffix = otherRoot.startsWith(currentRoot) || currentRoot.startsWith(otherRoot) || 
-                                   otherRoot.includes(currentRoot) || currentRoot.includes(otherRoot);
-
-          if (isSameRoot || isPrefixOrSuffix) {
-            priority1Movies.push(m);
-            addedIds.add(String(m.id));
-          }
-        }
-      });
-    }
-
-    // Logic ưu tiên 2: Cùng Thể loại với phim đang xem cho đến khi đủ 10 phim
-    const priority2Candidates = [];
-    if (priority1Movies.length < 10) {
-      candidateMovies.forEach(m => {
-        if (!addedIds.has(String(m.id))) {
-          const mGenres = Array.isArray(m.genres) 
-            ? m.genres.map(g => String(g).trim().toLowerCase()) 
-            : String(m.genres || '').split(/[,;/|]+/).map(g => g.trim().toLowerCase()).filter(Boolean);
-          
-          const matchCount = mGenres.filter(g => currentGenres.includes(g)).length;
-          if (matchCount > 0) {
-            priority2Candidates.push({ movie: m, matchCount });
-          }
-        }
-      });
-
-      // Sắp xếp ưu tiên phim có nhiều thể loại trùng nhất lên trước
-      priority2Candidates.sort((a, b) => b.matchCount - a.matchCount);
-    }
-
-    const priority2Movies = priority2Candidates.map(c => {
-      addedIds.add(String(c.movie.id));
-      return c.movie;
-    });
-
-    let combined = [...priority1Movies, ...priority2Movies];
-
-    // Nếu vẫn chưa đủ 10, điền thêm các phim khác trong DB cho đủ 10
-    if (combined.length < 10) {
-      for (const m of candidateMovies) {
-        if (!addedIds.has(String(m.id))) {
-          combined.push(m);
-          addedIds.add(String(m.id));
-          if (combined.length >= 10) break;
-        }
-      }
-    }
-
-    return combined.slice(0, 10);
-  }, [movieDetail, allMovies]);
+  const relatedMovies = useMemo(
+    () => getRelatedMovies(allMovies, movieDetail, 10),
+    [allMovies, movieDetail]
+  );
 
   const handleShare = () => {
     navigator.clipboard.writeText(window.location.href);
@@ -264,8 +184,18 @@ const DetailFilm = () => {
   } = movieDetail;
 
   const movieSlug = generateSlug(title) || activeId;
+  const movieServers = Array.isArray(movieDetail?.servers) && movieDetail.servers.length > 0
+    ? movieDetail.servers
+    : null;
+  const resolvedServerName = activeServerName && movieServers?.some(s => s.name === activeServerName)
+    ? activeServerName
+    : (movieServers?.find(s => s.name === 'Vietsub')?.name || movieServers?.[0]?.name || 'Vietsub');
+  const activeServerEpisodes = movieServers
+    ? (movieServers.find(s => s.name === resolvedServerName)?.episodes || episodes)
+    : episodes;
+
   const isMovie = isFeatureMovie(movieDetail);
-  const watchEpisode = isMovie ? episodes[0]?.number || 1 : selectedEpisode;
+  const watchEpisode = isMovie ? activeServerEpisodes[0]?.number || 1 : selectedEpisode;
 
   return (
     <div className="min-h-screen bg-background text-white pb-24">
@@ -334,9 +264,11 @@ const DetailFilm = () => {
                   <span className="px-2.5 py-1 rounded-lg bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 flex items-center gap-1 font-bold">
                     ★ {imdb} IMDb
                   </span>
-                  <span className="px-2.5 py-1 rounded-lg bg-neon-red/20 text-neon-red border border-neon-red/30">
-                    {ageRating}
-                  </span>
+                  {ageRating && (
+                    <span className="px-2.5 py-1 rounded-lg bg-neon-red/20 text-neon-red border border-neon-red/30">
+                      {ageRating}
+                    </span>
+                  )}
                   <span className="px-2.5 py-1 rounded-lg bg-white/10 text-gray-200 border border-white/10">
                     {year}
                   </span>
@@ -455,98 +387,24 @@ const DetailFilm = () => {
                 <span className="text-xs text-neon-cyan font-semibold">Nguồn m3u8 Vietsub • KKPhim</span>
               </div>
 
-              {/* Episode Rectangular Grid Buttons with SEO Slug URL */}
-              <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-2.5">
-                {episodes.map((ep) => (
-                  <Link
-                    key={ep.number}
-                    to={`/movie/${movieSlug}/tap-${ep.number}`}
-                    onClick={() => setSelectedEpisode(ep.number)}
-                    className={`py-2.5 px-3 rounded-xl text-center text-xs font-bold transition-all duration-200 border ${
-                      String(selectedEpisode) === String(ep.number)
-                        ? 'bg-neon-red text-white border-neon-red shadow-[0_0_15px_#e50914] scale-105'
-                        : 'bg-background/80 text-gray-300 hover:text-white border-glass-border hover:border-neon-red/50 hover:bg-neon-red/20'
-                    }`}
-                  >
-                    {ep.title}
-                  </Link>
-                ))}
-              </div>
+              <EpisodeSelector
+                episodes={activeServerEpisodes}
+                servers={movieServers || []}
+                activeServerName={resolvedServerName}
+                onSelectServer={(name) => setActiveServerName(name)}
+                activeEpisode={selectedEpisode}
+                getEpisodeLink={(_, epNum) => `/movie/${movieSlug}/tap-${epNum}${movieServers && movieServers.length > 1 ? `?server=${encodeURIComponent(resolvedServerName)}` : ''}`}
+                onSelectEpisode={(epNum) => setSelectedEpisode(epNum)}
+              />
             </div>}
 
             <MovieComments movieId={String(activeId)} />
 
           </div>
 
-          {/* Right Sidebar: Phim Liên Quan (NHIỆM VỤ 2 & 3) */}
+          {/* Right Sidebar: Phim Liên Quan */}
           <aside className="hidden xl:block w-80 flex-shrink-0 space-y-4">
-            <div className="p-5 rounded-2xl bg-surface-card/90 border border-glass-border backdrop-blur-md space-y-4">
-              <h3 className="text-base font-extrabold text-white flex items-center justify-between">
-                <span className="flex items-center gap-2">
-                  <span className="text-neon-red">🎬</span> Phim liên quan
-                </span>
-                <span className="text-[10px] text-gray-400 font-bold">210LoliPhim</span>
-              </h3>
-
-              <div className="space-y-3">
-                {relatedMovies.length === 0 ? (
-                  <p className="text-xs text-gray-400 text-center py-4">Chưa có phim liên quan</p>
-                ) : (
-                  relatedMovies.map((item, index) => {
-                    // BẮT BUỘC DÙNG BIẾN TRUNG GIAN CHO THUỘC TÍNH KEY KHI LẶP .MAP()
-                    const itemKey = `related-movie-${item.id || index}-${index}`;
-                    const itemSlug = generateSlug(item.title) || item.id;
-                    const itemRank = index + 1;
-                    const itemFormattedTitle = formatVietnameseSentenceCase(item.title);
-
-                    return (
-                      <Link 
-                        key={itemKey} 
-                        to={`/movie/${itemSlug}`}
-                        className="flex items-center space-x-3 p-2 rounded-xl hover:bg-white/5 transition-all group"
-                      >
-                        <span className={`text-2xl font-black italic w-6 text-center ${
-                          itemRank === 1 ? 'text-yellow-400 drop-shadow-[0_0_10px_rgba(250,204,21,0.5)]' :
-                          itemRank === 2 ? 'text-gray-300' :
-                          itemRank === 3 ? 'text-amber-600' : 'text-gray-600'
-                        }`}>
-                          {itemRank}
-                        </span>
-
-                        <div className="w-12 h-16 rounded-lg overflow-hidden flex-shrink-0 border border-glass-border group-hover:scale-105 transition-transform">
-                          <img 
-                            src={item.poster || item.banner} 
-                            alt={itemFormattedTitle} 
-                            className="w-full h-full object-cover" 
-                            onError={(e) => { e.target.src = 'https://images.unsplash.com/photo-1534447677768-be436bb09401?w=300'; }}
-                          />
-                        </div>
-
-                        <div className="flex-1 min-w-0">
-                          <h4 className="text-xs font-bold text-gray-200 truncate group-hover:text-neon-red transition-colors">
-                            {itemFormattedTitle}
-                          </h4>
-                          <div className="flex items-center space-x-2 text-[10px] text-gray-400 mt-0.5">
-                            <span className="text-yellow-400 font-semibold">★ {item.imdb || '8.0'}</span>
-                            {item.year && (
-                              <>
-                                <span>•</span>
-                                <span>{item.year}</span>
-                              </>
-                            )}
-                          </div>
-                          {Array.isArray(item.genres) && item.genres.length > 0 && (
-                            <p className="text-[10px] text-gray-500 truncate mt-0.5">
-                              {item.genres.slice(0, 2).join(', ')}
-                            </p>
-                          )}
-                        </div>
-                      </Link>
-                    );
-                  })
-                )}
-              </div>
-            </div>
+            <RelatedMoviesSidebar movies={relatedMovies} />
           </aside>
 
         </div>

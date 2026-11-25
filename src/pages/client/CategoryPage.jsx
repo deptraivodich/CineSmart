@@ -2,7 +2,9 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import MovieCard from '../../components/ui/MovieCard';
 import { getMovies } from '../../services/movieService';
-import { ANIME_GENRES } from '../../components/common/Navbar';
+import { ANIME_GENRES, ANIME_SEASONS } from '../../components/common/Navbar';
+import { getGenreDescription } from '../../utils/malGenres';
+import { isFeatureMovie } from '../../utils/movieFormat';
 import { formatVietnameseSentenceCase } from '../../utils/textUtils';
 
 /**
@@ -14,6 +16,13 @@ import { formatVietnameseSentenceCase } from '../../utils/textUtils';
  * - Quick Search inside modal & live badges
  * - Click outside to close modal & red X close button
  */
+const SEASON_META = {
+  dong: { key: 'winter', label: 'Mùa Đông', months: 'Tháng 1 – Tháng 3' },
+  xuan: { key: 'spring', label: 'Mùa Xuân', months: 'Tháng 4 – Tháng 6' },
+  ha: { key: 'summer', label: 'Mùa Hạ', months: 'Tháng 7 – Tháng 9' },
+  thu: { key: 'fall', label: 'Mùa Thu', months: 'Tháng 10 – Tháng 12' },
+};
+
 const CategoryPage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const [allMovies, setAllMovies] = useState([]);
@@ -24,8 +33,32 @@ const CategoryPage = () => {
   // Match Mode: 'AND' (Must match all selected tags) | 'OR' (Must match at least one tag)
   const [matchMode, setMatchMode] = useState('AND');
   
-  // Sort Mode: 'imdb' | 'year' | 'title'
-  const [sortBy, setSortBy] = useState('imdb');
+  // Sort Mode: 'year' (default primary) | 'imdb' | 'title' — persisted in URL ?sort=...
+  const sortBy = useMemo(() => {
+    const raw = searchParams.get('sort');
+    return ['year', 'imdb', 'title'].includes(raw) ? raw : 'year';
+  }, [searchParams]);
+
+  const setSortBy = (nextSort) => {
+    const currentParams = Object.fromEntries(searchParams.entries());
+    currentParams.sort = nextSort;
+    setSearchParams(currentParams);
+  };
+
+  const [hoveredModalGenre, setHoveredModalGenre] = useState('Action');
+  const [seasonDropdownOpen, setSeasonDropdownOpen] = useState(false);
+
+  const selectSeasonParam = (season, year) => {
+    const currentParams = Object.fromEntries(searchParams.entries());
+    currentParams.season = season;
+    currentParams.year = String(year);
+    setSearchParams(currentParams);
+    setSeasonDropdownOpen(false);
+  };
+
+  const typeParam = searchParams.get('type') || '';
+  const seasonParam = searchParams.get('season') || '';
+  const yearParam = searchParams.get('year') || '';
 
   // Extract active genres from URL search params (?genres=Action,Comedy or ?genre=Action)
   const activeGenres = useMemo(() => {
@@ -78,9 +111,15 @@ const CategoryPage = () => {
     }
   };
 
-  // Clear all selected genres
+  // Clear all selected filters
   const clearAllGenres = () => {
-    updateGenreParams([]);
+    const currentParams = Object.fromEntries(searchParams.entries());
+    delete currentParams.genres;
+    delete currentParams.genre;
+    delete currentParams.type;
+    delete currentParams.season;
+    delete currentParams.year;
+    setSearchParams(currentParams);
   };
 
   // Select all anime genres
@@ -98,6 +137,11 @@ const CategoryPage = () => {
     return [];
   };
 
+  const hasAnySeasonData = useMemo(
+    () => Array.isArray(allMovies) && allMovies.some(m => Boolean(m?.animeSeason)),
+    [allMovies]
+  );
+
   // Filter & Sort movies based on active genres, search query, and sort criteria
   const filteredMovies = useMemo(() => {
     if (!Array.isArray(allMovies)) return [];
@@ -113,6 +157,23 @@ const CategoryPage = () => {
         if (!titleMatch && !originalMatch) {
           return false;
         }
+      }
+
+      // 1b. Movie Type Filter (?type=movie)
+      if (typeParam === 'movie' && !isFeatureMovie(movie)) {
+        return false;
+      }
+
+      // 1c. Anime Season & Year Filter (?season=dong&year=2026)
+      if (seasonParam && yearParam) {
+        const meta = SEASON_META[seasonParam];
+        const movieSeasonYear = String(movie.animeSeasonYear || movie.year || '');
+        if (movieSeasonYear !== String(yearParam)) return false;
+        if (hasAnySeasonData && meta && String(movie.animeSeason || '').toLowerCase() !== meta.key) {
+          return false;
+        }
+      } else if (yearParam && String(movie.year || '') !== String(yearParam)) {
+        return false;
       }
 
       // 2. Multi-Genre Filter
@@ -152,7 +213,7 @@ const CategoryPage = () => {
     });
 
     return result;
-  }, [allMovies, activeGenres, searchQueryParam, matchMode, sortBy]);
+  }, [allMovies, activeGenres, searchQueryParam, matchMode, sortBy, typeParam, seasonParam, yearParam, hasAnySeasonData]);
 
   return (
     <div className="min-h-screen bg-background text-gray-100 flex flex-col pt-24 pb-20">
@@ -176,15 +237,71 @@ const CategoryPage = () => {
               </div>
 
               <h1 className="text-2xl sm:text-4xl font-black text-white font-display flex flex-wrap items-center gap-3">
-                <span>Kho Phim & Thể Loại Anime</span>
+                <span>
+                  {seasonParam && yearParam && SEASON_META[seasonParam]
+                    ? `Anime Season: ${SEASON_META[seasonParam].label} năm ${yearParam}`
+                    : typeParam === 'movie'
+                      ? 'Kho Anime Movie (Phim Lẻ)'
+                      : 'Kho Phim & Thể Loại Anime'}
+                </span>
                 <span className="text-xs px-3 py-1 rounded-full bg-amber-400/20 text-amber-300 border border-amber-400/30 font-bold">
                   {filteredMovies.length} Bộ Phim
                 </span>
               </h1>
+              {seasonParam && yearParam && SEASON_META[seasonParam] && (
+                <p className="text-xs text-purple-300 mt-1 font-medium">
+                  🗓️ Lịch phát sóng Nhật Bản: {SEASON_META[seasonParam].months} năm {yearParam}
+                  {!hasAnySeasonData && (
+                    <span className="ml-2 text-amber-300/90">
+                      (DB chưa đồng bộ dữ liệu mùa do hết quota Firestore — đang hiển thị tạm toàn bộ phim năm {yearParam})
+                    </span>
+                  )}
+                </p>
+              )}
             </div>
 
-            {/* Quick Actions: Open Modal & Mode Switch */}
-            <div className="flex items-center space-x-3">
+            {/* Quick Actions: Season Picker, Open Genre Modal & Sort Selector */}
+            <div className="flex flex-wrap items-center gap-3">
+              {/* Season Selector Button + Dropdown */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setSeasonDropdownOpen(v => !v)}
+                  className={`px-4 py-2.5 rounded-xl font-black text-xs transition-all flex items-center gap-2 cursor-pointer border ${
+                    seasonParam && yearParam
+                      ? 'bg-purple-600 text-white border-purple-400 shadow-[0_0_15px_rgba(147,51,234,0.45)]'
+                      : 'bg-[#23294a] hover:bg-[#2d355e] text-gray-100 border-white/15'
+                  }`}
+                >
+                  <span>🗓️ {seasonParam && yearParam && SEASON_META[seasonParam] ? `${SEASON_META[seasonParam].label} ${yearParam}` : 'Chọn Season'}</span>
+                  <span className="text-[10px]">▾</span>
+                </button>
+                {seasonDropdownOpen && (
+                  <>
+                    <div className="fixed inset-0 z-40" onClick={() => setSeasonDropdownOpen(false)} />
+                    <div className="absolute left-0 sm:right-0 sm:left-auto mt-2 w-[320px] sm:w-[400px] z-50 bg-[#14172b] border border-white/15 rounded-xl p-3.5 shadow-2xl grid grid-cols-2 sm:grid-cols-3 gap-2">
+                      {ANIME_SEASONS.map((item) => {
+                        const active = seasonParam === item.season && String(yearParam) === String(item.year);
+                        return (
+                          <button
+                            type="button"
+                            key={`${item.season}-${item.year}`}
+                            onClick={() => selectSeasonParam(item.season, item.year)}
+                            className={`px-2.5 py-2 rounded-lg text-xs font-semibold text-left transition-colors cursor-pointer ${
+                              active
+                                ? 'bg-purple-600 text-white font-bold'
+                                : 'text-gray-200 hover:bg-purple-500/20 hover:text-purple-300'
+                            }`}
+                          >
+                            {item.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+              </div>
+
               <button
                 type="button"
                 onClick={() => setIsFilterModalOpen(true)}
@@ -196,14 +313,14 @@ const CategoryPage = () => {
                 </span>
               </button>
 
-              {/* Sort Selector */}
+              {/* Sort Selector (Year is primary & persisted in URL) */}
               <select
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value)}
                 className="py-2.5 px-3 rounded-xl bg-surface border border-glass-border text-xs text-gray-200 focus:outline-none focus:border-amber-400 cursor-pointer"
               >
-                <option value="imdb">★ Điểm IMDb cao nhất</option>
                 <option value="year">📅 Năm phát hành mới nhất</option>
+                <option value="imdb">★ Điểm IMDb cao nhất</option>
                 <option value="title">🔤 Tên A - Z</option>
               </select>
             </div>
@@ -215,7 +332,19 @@ const CategoryPage = () => {
               <span>Đang lọc theo:</span>
             </span>
 
-            {activeGenres.length === 0 ? (
+            {typeParam === 'movie' && (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-neon-cyan/20 text-neon-cyan border border-neon-cyan/40 text-xs font-bold shadow-sm">
+                <span>🎬 Movie</span>
+              </span>
+            )}
+
+            {yearParam && (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-purple-500/20 text-purple-300 border border-purple-500/40 text-xs font-bold shadow-sm">
+                <span>🗓️ {{ dong: 'Mùa Đông', xuan: 'Mùa Xuân', ha: 'Mùa Hạ', thu: 'Mùa Thu' }[seasonParam] || 'Năm'} {yearParam}</span>
+              </span>
+            )}
+
+            {activeGenres.length === 0 && typeParam !== 'movie' && !yearParam ? (
               <span className="px-3 py-1 rounded-lg bg-white/5 border border-white/10 text-gray-400 text-xs italic">
                 Tất cả thể loại (Chưa chọn lọc)
               </span>
@@ -238,7 +367,7 @@ const CategoryPage = () => {
               ))
             )}
 
-            {activeGenres.length > 0 && (
+            {(activeGenres.length > 0 || typeParam === 'movie' || Boolean(yearParam)) && (
               <button
                 type="button"
                 onClick={clearAllGenres}
@@ -248,6 +377,20 @@ const CategoryPage = () => {
               </button>
             )}
           </div>
+
+          {/* Short Description for Active Selected Genres */}
+          {activeGenres.length > 0 && (
+            <div className="flex flex-wrap gap-2 pt-1">
+              {activeGenres.map(genre => {
+                const desc = getGenreDescription(genre);
+                return desc ? (
+                  <p key={genre} className="text-xs text-gray-300 bg-white/5 border border-white/10 rounded-lg px-3 py-1.5">
+                    <span className="text-amber-300 font-bold">💡 {genre}:</span> {desc}
+                  </p>
+                ) : null;
+              })}
+            </div>
+          )}
 
           {/* AND / OR Filter Strategy Switch */}
           {activeGenres.length > 1 && (
@@ -426,7 +569,12 @@ const CategoryPage = () => {
               )}
             </div>
 
-            {/* 46 Genre Badges Grid */}
+            {/* Short Genre Description Preview */}
+            <p className="text-xs text-amber-200/90 bg-black/25 px-3 py-2 rounded-xl border border-amber-400/20 leading-snug">
+              💡 <strong>{hoveredModalGenre}:</strong> {getGenreDescription(hoveredModalGenre)}
+            </p>
+
+            {/* Genre Badges Grid */}
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 max-h-64 overflow-y-auto custom-scrollbar pr-1">
               {ANIME_GENRES.filter(g => !filterSearch || g.toLowerCase().includes(filterSearch.toLowerCase())).map((genre) => {
                 const isSelected = activeGenres.some(g => g.toLowerCase() === genre.toLowerCase());
@@ -434,7 +582,9 @@ const CategoryPage = () => {
                   <button
                     type="button"
                     key={genre}
-                    onClick={() => toggleGenreParam(genre)}
+                    onMouseEnter={() => setHoveredModalGenre(genre)}
+                    onClick={() => { setHoveredModalGenre(genre); toggleGenreParam(genre); }}
+                    title={`${genre}: ${getGenreDescription(genre)}`}
                     className={`px-3 py-2 rounded-xl text-xs font-bold text-center truncate transition-all cursor-pointer border ${
                       isSelected
                         ? 'bg-amber-400 text-black border-amber-400 shadow-[0_0_12px_rgba(245,158,11,0.5)] scale-[1.02]'
