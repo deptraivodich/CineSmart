@@ -38,16 +38,59 @@ export async function connectFirestore(env = process.env) {
   return { db, close: () => deleteApp(app) };
 }
 
-// One bounded catalogue identity scan per invocation, then one document per movie.
+const IDENTITY_FIELDS = ['title', 'originalTitle', 'year', 'slug', 'sourceSlug', 'country'];
+
+// Targeted per-movie lookup avoids scanning the entire catalogue on every invocation.
 export async function firestoreStore(db, { dryRun = false, now = Date.now } = {}) {
   const owner = randomUUID(), ref = db.doc('crawlerJobs/dailyJapaneseAnime');
-  const snapshot = await readFirestore(() => db.collection('movies').select('title', 'originalTitle', 'year', 'slug', 'sourceSlug').limit(10001).get());
-  if (snapshot.size > 10000) throw new Error('Catalogue exceeds 10000 movies; migrate to an indexed identity catalogue before running');
-  const catalog = snapshot.docs.map(d => ({ ...d.data(), id: d.id }));
+  const moviesCol = db.collection('movies');
+  const yearCache = new Map();
+  const runCatalog = new Map();
   const virtual = new Map();
   let leased = false;
   function fence(current) {
     if (!current || current.owner !== owner || current.leaseUntil <= now()) throw new Error('Crawler lease lost; refusing stale writes');
+  }
+  async function loadYearCandidates(rawYear) {
+    const yearStr = String(rawYear ?? '').trim();
+    if (!yearStr) return [];
+    if (!yearCache.has(yearStr)) {
+      const yearNum = /^\d{4}$/.test(yearStr) ? Number(yearStr) : null;
+      const q = yearNum !== null
+        ? moviesCol.where('year', 'in', [yearStr, yearNum])
+        : moviesCol.where('year', '==', yearStr);
+      const snap = await readFirestore(() => q.select(...IDENTITY_FIELDS).limit(1000).get());
+      yearCache.set(yearStr, snap.docs.map(d => ({ ...d.data(), id: d.id })));
+    }
+    const merged = new Map(yearCache.get(yearStr).map(m => [m.id, m]));
+    for (const [id, m] of runCatalog) {
+      if (String(m.year ?? '').trim() === yearStr) merged.set(id, m);
+    }
+    return [...merged.values()];
+  }
+  async function resolveIncoming(incoming) {
+    if (!incoming) return { id: null, prefetched: null };
+    const slug = incoming.sourceSlug || incoming.slug;
+    if (runCatalog.size) {
+      const inRun = findMovie([...runCatalog.values()], incoming);
+      if (inRun) return { id: inRun.id, prefetched: virtual.get(inRun.id) || null };
+    }
+    if (slug) {
+      const directId = sourceMovieId(slug);
+      const directSnap = await readFirestore(() => moviesCol.doc(directId).get());
+      if (directSnap.exists) return { id: directSnap.id, prefetched: directSnap.data() };
+      const [bySourceSnap, bySlugSnap] = await Promise.all([
+        readFirestore(() => moviesCol.where('sourceSlug', '==', slug).select(...IDENTITY_FIELDS).limit(2).get()),
+        readFirestore(() => moviesCol.where('slug', '==', slug).select(...IDENTITY_FIELDS).limit(2).get()),
+      ]);
+      const exact = new Map();
+      for (const d of [...bySourceSnap.docs, ...bySlugSnap.docs]) exact.set(d.id, { ...d.data(), id: d.id });
+      if (exact.size > 1) throw new SourceError('Ambiguous source identity; reconcile manually');
+      if (exact.size === 1) return { id: [...exact.keys()][0], prefetched: null };
+    }
+    const candidates = await loadYearCandidates(incoming.year);
+    const candidate = candidates.length ? findMovie(candidates, incoming) : null;
+    return { id: candidate?.id || sourceMovieId(incoming.sourceSlug), prefetched: null };
   }
   return {
     async acquire({ start, end }) {
@@ -70,11 +113,14 @@ export async function firestoreStore(db, { dryRun = false, now = Date.now } = {}
       leased = job.owner === owner; return job;
     },
     async commit(state, incoming) {
-      let candidate;
-      try { candidate = incoming ? findMovie(catalog, incoming) : null; }
-      catch (error) { throw new SourceError(error.message); }
-      const id = incoming ? candidate?.id || sourceMovieId(incoming.sourceSlug) : null;
-      const movieRef = id ? db.collection('movies').doc(id) : null;
+      let id = null, prefetched = null;
+      try { ({ id, prefetched } = await resolveIncoming(incoming)); }
+      catch (error) {
+        if (error instanceof SourceError) throw error;
+        if (/Ambiguous/.test(error.message)) throw new SourceError(error.message);
+        throw error;
+      }
+      const movieRef = id ? moviesCol.doc(id) : null;
       let committedMovie;
       const perform = async tx => {
         committedMovie = undefined;
@@ -84,7 +130,7 @@ export async function firestoreStore(db, { dryRun = false, now = Date.now } = {}
         }
         let existing;
         if (movieRef) {
-          existing = virtual.get(id);
+          existing = virtual.get(id) || (dryRun ? prefetched : undefined);
           if (!existing) {
             const doc = await (tx ? tx.get(movieRef) : readFirestore(() => movieRef.get()));
             if (doc.exists) existing = doc.data();
@@ -118,8 +164,7 @@ export async function firestoreStore(db, { dryRun = false, now = Date.now } = {}
       }
       if (committedMovie) {
         if (dryRun) virtual.set(id, committedMovie);
-        const i = catalog.findIndex(m => m.id === id);
-        if (i < 0) catalog.push(committedMovie); else catalog[i] = committedMovie;
+        runCatalog.set(id, committedMovie);
       }
       return next;
     },

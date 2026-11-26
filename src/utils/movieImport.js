@@ -37,20 +37,95 @@ export function mergeEpisodes(existing = [], incoming = []) {
   return { episodes, added };
 }
 
+const stripAccents = v => text(v).normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/gi, 'd');
+const compactTitle = v => stripAccents(v).toLowerCase().replace(/[^a-z0-9]+/g, '');
+const ROMAN_SEASON = { ii: '2', iii: '3', iv: '4', vi: '6', vii: '7', viii: '8', ix: '9', x: '10' };
+
+function seasonTokens(movie) {
+  const combined = `${normalizeTitle(movie.title)} ${normalizeTitle(movie.originalTitle)}`;
+  const found = new Set();
+  for (const m of combined.matchAll(/(?:season|part|phần|mùa|cour|ss)\s*(\d+)/g)) found.add(String(Number(m[1])));
+  for (const m of combined.matchAll(/\bs\s*(\d+)\b/g)) found.add(String(Number(m[1])));
+  for (const m of combined.matchAll(/\b(\d+)(?:st|nd|rd|th)\s*season\b/g)) found.add(String(Number(m[1])));
+  for (const m of combined.matchAll(/\b(ii|iii|iv|vi|vii|viii|ix|x)\b/g)) found.add(ROMAN_SEASON[m[1]]);
+  return [...found].sort().join(',');
+}
+
+function numberTokens(movie) {
+  const combined = `${normalizeTitle(movie.title)} ${normalizeTitle(movie.originalTitle)}`;
+  return [...new Set([...combined.matchAll(/\d+/g)].map(m => String(Number(m[0]))))].sort().join(',');
+}
+
+function countryTokens(country) {
+  return new Set(
+    stripAccents(Array.isArray(country) ? country.map(c => c?.name || c).join(',') : country)
+      .toLowerCase()
+      .split(/[,/|]+/)
+      .map(s => s.trim().replace(/\s+/g, ' '))
+      .filter(Boolean)
+  );
+}
+
+function countriesCompatible(a, b) {
+  const ca = countryTokens(a), cb = countryTokens(b);
+  if (!ca.size || !cb.size) return true;
+  for (const token of ca) if (cb.has(token)) return true;
+  return false;
+}
+
+function editDistance(a, b) {
+  if (a === b) return 0;
+  if (Math.abs(a.length - b.length) > 2) return 3;
+  const prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    let diag = prev[0];
+    prev[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const next = prev[j];
+      prev[j] = a[i - 1] === b[j - 1] ? diag : 1 + Math.min(diag, prev[j], prev[j - 1]);
+      diag = next;
+    }
+  }
+  return prev[b.length];
+}
+
+function nearTitleMatch(a, b) {
+  const ca = compactTitle(a), cb = compactTitle(b);
+  if (!ca || !cb) return false;
+  if (ca === cb) return true;
+  const maxLen = Math.max(ca.length, cb.length);
+  if (maxLen < 8) return false;
+  const dist = editDistance(ca, cb);
+  return dist <= 2 && (maxLen - dist) / maxLen >= 0.85;
+}
+
 export function findMovie(movies, incoming) {
   const slug = incoming.sourceSlug || incoming.slug;
   const exact = slug ? movies.filter(m => [m.sourceSlug, m.slug, m.id].includes(slug)) : [];
   if (exact.length > 1) throw new Error('Ambiguous source identity; reconcile manually');
   if (exact.length) return exact[0];
-  const matches = movies.filter(m => {
+  const incomingSeasons = seasonTokens(incoming);
+  const baseEligible = movies.filter(m => {
     if (m.sourceSlug && slug && m.sourceSlug !== slug) return false;
     if (m.year && incoming.year && text(m.year) !== text(incoming.year)) return false;
-    const seasons = movie => [...new Set([...`${normalizeTitle(movie.title)} ${normalizeTitle(movie.originalTitle)}`.matchAll(/(?:season|part|phần|mùa)\s*(\d+)/g)].map(x => x[1]))].sort().join(',');
-    if (seasons(m) !== seasons(incoming)) return false;
-    return ['title', 'originalTitle'].some(k => incoming[k] && m[k] && normalizeTitle(m[k]) === normalizeTitle(incoming[k]));
+    return seasonTokens(m) === incomingSeasons;
   });
+  const matches = baseEligible.filter(m =>
+    ['title', 'originalTitle'].some(k => incoming[k] && m[k] && normalizeTitle(m[k]) === normalizeTitle(incoming[k]))
+  );
   if (matches.length > 1) throw new Error('Ambiguous legacy identity; reconcile manually');
-  return matches[0] || null;
+  if (matches.length) return matches[0];
+  // Near-match fallback requires matching year, country, seasons, and all numeric tokens (so ss1 vs ss2 never collide).
+  if (!incoming.year) return null;
+  const incomingNumbers = numberTokens(incoming);
+  const near = baseEligible.filter(m => {
+    if (!m.year || text(m.year) !== text(incoming.year)) return false;
+    if (numberTokens(m) !== incomingNumbers) return false;
+    if (!countriesCompatible(m.country, incoming.country)) return false;
+    return ['title', 'originalTitle'].some(k => incoming[k] && m[k] && nearTitleMatch(m[k], incoming[k]));
+  });
+  if (near.length > 1) throw new Error('Ambiguous legacy identity; reconcile manually');
+  return near[0] || null;
 }
 
 export function sourceMovieId(slug) {

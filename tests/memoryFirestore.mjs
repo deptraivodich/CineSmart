@@ -5,13 +5,21 @@ export class MemoryFirestore {
     this.data = new Map(Object.entries(structuredClone(seed)));
     this.writes = 0;
     this.movieWrites = 0;
+    this.movieReads = 0;
     this.serial = Promise.resolve();
     this.failAfterMovieCommit = false;
     this.failBeforeMovieCommit = false;
   }
   doc(path) {
     const db = this;
-    return { path, id: path.split('/').at(-1), async get() { return db.snapshot(path); } };
+    return {
+      path,
+      id: path.split('/').at(-1),
+      async get() {
+        if (path.startsWith('movies/')) db.movieReads++;
+        return db.snapshot(path);
+      },
+    };
   }
   snapshot(path) {
     const value = this.data.get(path);
@@ -19,16 +27,32 @@ export class MemoryFirestore {
   }
   collection(name) {
     const db = this;
-    let maximum = Infinity;
-    return {
+    const makeQuery = (filters = [], maximum = Infinity) => ({
       doc: id => db.doc(name + '/' + id),
-      select() { return this; },
-      limit(n) { maximum = n; return this; },
+      select: () => makeQuery(filters, maximum),
+      limit: n => makeQuery(filters, n),
+      where: (field, op, value) => makeQuery([...filters, { field, op, value }], maximum),
       async get() {
-        const docs = [...db.data.keys()].filter(p => p.startsWith(name + '/')).slice(0, maximum).map(p => db.snapshot(p));
+        const docs = [...db.data.keys()]
+          .filter(p => p.startsWith(name + '/'))
+          .filter(p => {
+            const doc = db.data.get(p);
+            return filters.every(({ field, op, value }) => {
+              const actual = doc?.[field];
+              if (op === '==') return actual === value;
+              if (op === 'in') return Array.isArray(value) && value.includes(actual);
+              throw new Error('Unsupported MemoryFirestore operator: ' + op);
+            });
+          })
+          .slice(0, maximum)
+          .map(p => {
+            if (name === 'movies') db.movieReads++;
+            return db.snapshot(p);
+          });
         return { size: docs.length, docs };
       },
-    };
+    });
+    return makeQuery();
   }
   async runTransaction(callback) {
     const previous = this.serial;
@@ -37,7 +61,10 @@ export class MemoryFirestore {
     await previous;
     const pending = [];
     const tx = {
-      get: async ref => this.snapshot(ref.path),
+      get: async ref => {
+        if (ref.path.startsWith('movies/')) this.movieReads++;
+        return this.snapshot(ref.path);
+      },
       set: (ref, data) => pending.push({ ref, data, kind: 'set' }),
       create: (ref, data) => pending.push({ ref, data, kind: 'create' }),
       update: (ref, data) => pending.push({ ref, data, kind: 'update' }),
