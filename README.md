@@ -4,6 +4,20 @@ Nền tảng xem Anime & Hoạt hình trực tuyến xây dựng bằng **React 
 
 ---
 
+## Giao diện ứng dụng
+
+### Trang Xem Phim & Trình phát Video
+![Giao diện Xem Phim](docs/screenshots/watch-page.jpg)
+
+### Bộ lọc Anime Season & Kho Phim theo Thể loại
+![Lọc Anime Season & Thể Loại](docs/screenshots/category-season.jpg)
+
+| Chọn Đa Thể Loại (78 tag MyAnimeList) | Gom nhóm 100 tập & Tìm tập | Phim Liên Quan |
+| :---: | :---: | :---: |
+| ![Chọn Đa Thể Loại](docs/screenshots/genre-filter.jpg) | ![Gom nhóm tập & Tìm tập](docs/screenshots/episode-selector.jpg) | ![Phim liên quan](docs/screenshots/related-movies.jpg) |
+
+---
+
 ## Tính năng nổi bật
 
 - **Trình phát Video tối ưu cho Anime (`Artplayer + Hls.js`):**
