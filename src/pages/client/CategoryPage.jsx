@@ -169,7 +169,7 @@ const CategoryPage = () => {
         const meta = SEASON_META[seasonParam];
         const movieSeasonYear = String(movie.animeSeasonYear || movie.year || '');
         if (movieSeasonYear !== String(yearParam)) return false;
-        if (hasAnySeasonData && meta && String(movie.animeSeason || '').toLowerCase() !== meta.key) {
+        if (meta && String(movie.animeSeason || '').toLowerCase() !== meta.key) {
           return false;
         }
       } else if (yearParam && String(movie.year || '') !== String(yearParam)) {
@@ -253,7 +253,7 @@ const CategoryPage = () => {
                   🗓️ Lịch phát sóng Nhật Bản: {SEASON_META[seasonParam].months} năm {yearParam}
                   {!hasAnySeasonData && (
                     <span className="ml-2 text-amber-300/90">
-                      (DB chưa đồng bộ dữ liệu mùa do hết quota Firestore — đang hiển thị tạm toàn bộ phim năm {yearParam})
+                      (DB chưa đồng bộ dữ liệu mùa — hãy chạy đồng bộ MAL/AniList để phân loại phim theo từng mùa)
                     </span>
                   )}
                 </p>

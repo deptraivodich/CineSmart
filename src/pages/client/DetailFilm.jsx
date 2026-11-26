@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import Navbar from '../../components/common/Navbar';
 import { getMovies } from '../../services/movieService';
@@ -46,12 +46,17 @@ const DetailFilm = () => {
   const [isFavorite, setIsFavorite] = useState(false);
   const [viewsCount, setViewsCount] = useState(0);
   const [copied, setCopied] = useState(false);
+  const [descExpanded, setDescExpanded] = useState(false);
+  const [isDescTruncated, setIsDescTruncated] = useState(false);
+  const descRef = useRef(null);
 
   // Fetch & re-bind movie data whenever slug/id in URL changes
   useEffect(() => {
     const fetchMovieData = async () => {
       setIsLoading(true);
       setMovieDetail(null); // Clear previous state immediately!
+      setDescExpanded(false);
+      setIsDescTruncated(false);
 
       try {
         const moviesList = await getMovies();
@@ -133,6 +138,12 @@ const DetailFilm = () => {
     fetchMovieData();
     window.scrollTo(0, 0); // Scroll to top when changing movie
   }, [targetSlug]);
+
+  useEffect(() => {
+    if (descExpanded || !descRef.current) return;
+    const el = descRef.current;
+    setIsDescTruncated(el.scrollHeight > el.clientHeight + 1);
+  }, [movieDetail?.description, isLoading, descExpanded]);
 
   // Thuật toán 'Phim Liên Quan' (Tối đa 10 phim)
   const relatedMovies = useMemo(
@@ -299,9 +310,23 @@ const DetailFilm = () => {
                 </div>
 
                 {/* Storyline Description */}
-                <p className="text-gray-300 text-xs sm:text-sm leading-relaxed max-w-3xl line-clamp-4">
-                  {description}
-                </p>
+                <div className="max-w-3xl">
+                  <p
+                    ref={descRef}
+                    className={`text-gray-300 text-xs sm:text-sm leading-relaxed ${descExpanded ? '' : 'line-clamp-4'}`}
+                  >
+                    {description}
+                  </p>
+                  {(isDescTruncated || descExpanded) && (
+                    <button
+                      type="button"
+                      onClick={() => setDescExpanded(prev => !prev)}
+                      className="mt-1 text-xs font-bold text-amber-400 hover:text-amber-300 transition-colors cursor-pointer"
+                    >
+                      {descExpanded ? 'Thu gọn ▲' : 'Xem thêm ▼'}
+                    </button>
+                  )}
+                </div>
 
                 {/* Country & Director (ĐÃ XÓA BỎ DÒNG 'Diễn viên: Đang cập nhật' THEO NHIỆM VỤ 2) */}
                 <div className="text-xs text-gray-400 space-y-1 pt-1">

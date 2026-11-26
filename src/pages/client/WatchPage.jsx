@@ -239,11 +239,6 @@ const WatchPage = () => {
     }
   };
 
-  const handlePlayExternal = () => {
-    if (playerRef.current) {
-      playerRef.current.play();
-    }
-  };
 
   const handleToggleFavorite = async () => {
     if (!currentMovie?.id) return;
@@ -280,6 +275,9 @@ const WatchPage = () => {
     originalTitle,
     poster,
     banner,
+    description,
+    imdb,
+    duration,
     quality = '4K UltraHD',
     year = '2024'
   } = currentMovie;
@@ -378,21 +376,79 @@ const WatchPage = () => {
           />
         </div>
 
-        {/* Movie information and actions */}
-        <div className="p-6 rounded-2xl glass-panel flex flex-col xl:flex-row items-start xl:items-center justify-between gap-4">
-          <div className="min-w-0 flex-1">
-            <h1 className="text-2xl font-bold text-white flex flex-wrap items-center gap-3">
-              <span>{formattedTitle} ({year})</span>
-              <span className="inline-flex shrink-0 items-center justify-center whitespace-nowrap self-center px-2.5 py-1 leading-none rounded-lg text-xs font-black bg-neon-red text-white shadow-[0_0_10px_rgba(229,9,20,0.5)]">
-                {episodeLabel}
+        {/* Series episode selection (Max 100 per range). Movies have one full stream. */}
+        {!isMovie && <div className="p-6 rounded-2xl glass-panel space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <h3 className="text-base font-bold text-white flex items-center gap-2">
+              <span className="w-1.5 h-4 bg-red-600 rounded-full"></span>
+              <span>Danh Sách Chọn Tập Phim</span>
+              <span className="text-xs text-amber-400 font-extrabold px-2.5 py-0.5 rounded-full bg-amber-400/15 border border-amber-400/30">
+                {episodes.length} Tập
               </span>
-            </h1>
-            <p className="text-gray-400 text-xs sm:text-sm mt-1 font-mono">
-              {originalTitle ? `${originalTitle} • ` : ''}Nguồn: KKPhim Luồng M3U8 Trực Tiếp • {quality}
-            </p>
+            </h3>
+            <span className="text-xs text-neon-cyan font-semibold">Click tập bất kỳ để chuyển luồng phát ngay lập tức</span>
           </div>
 
-          <div className="flex shrink-0 flex-wrap items-center gap-3">
+          <EpisodeSelector
+            episodes={episodes}
+            servers={movieServers || []}
+            activeServerName={resolvedServerName}
+            onSelectServer={(name) => {
+              setActiveServerName(name);
+              const nextParams = new URLSearchParams(searchParams);
+              nextParams.set('server', name);
+              setSearchParams(nextParams, { replace: true });
+            }}
+            activeEpisode={currentEpName}
+            onSelectEpisode={(epNum) => handleSelectEpisode(epNum)}
+          />
+        </div>}
+
+        {/* Movie information, description and actions */}
+        <div className="relative overflow-hidden p-5 sm:p-6 rounded-2xl glass-panel space-y-5">
+          {(banner || poster) && (
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-0 bg-cover bg-center opacity-15 blur-sm scale-105"
+              style={{ backgroundImage: `url(${banner || poster})` }}
+            />
+          )}
+          <div className="relative flex flex-col sm:flex-row items-start gap-5">
+            {(poster || banner) && (
+              <img
+                src={poster || banner}
+                alt={formattedTitle}
+                className="w-28 sm:w-36 aspect-[2/3] rounded-xl object-cover border border-white/15 shadow-xl shrink-0"
+              />
+            )}
+            <div className="min-w-0 flex-1 w-full space-y-2.5">
+              <h1 className="text-xl sm:text-2xl font-black text-amber-400 leading-snug break-words flex flex-wrap items-center gap-2.5">
+                <span>{formattedTitle} ({year})</span>
+                <span className="inline-flex shrink-0 items-center justify-center whitespace-nowrap px-2.5 py-1 leading-none rounded-lg text-xs font-black bg-neon-red text-white shadow-[0_0_10px_rgba(229,9,20,0.5)]">
+                  {episodeLabel}
+                </span>
+              </h1>
+              <p className="text-gray-300 text-xs sm:text-sm font-medium break-words">
+                {originalTitle ? `${originalTitle} • ` : ''}Nguồn: KKPhim Luồng M3U8 Trực Tiếp • {quality}
+              </p>
+              <p className="text-gray-200/90 text-sm leading-relaxed break-words">
+                {description ? String(description).replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim() : 'Chưa có mô tả nội dung cho phim này.'}
+              </p>
+              <div className="pt-1 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-gray-300 font-semibold">
+                {imdb && Number(imdb) > 0 && (
+                  <span className="inline-flex items-center gap-1 text-amber-300">
+                    <span>★</span>
+                    <span>IMDb {imdb}/10</span>
+                  </span>
+                )}
+                {duration && <span>⏱ {duration}</span>}
+                <span>📅 {year}</span>
+                <span>👁 {viewsCount.toLocaleString()} Lượt Xem</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="relative pt-4 border-t border-white/10 flex flex-wrap items-center gap-3">
             {/* UI Nút Lượt xem: hiển thị số Lượt xem đồng bộ toàn cầu (bắt đầu từ 0) */}
             <div 
               title={`Tổng lượt xem toàn cầu: ${viewsCount.toLocaleString()} lượt`}
@@ -404,7 +460,7 @@ const WatchPage = () => {
               <span>{viewsCount.toLocaleString()}</span>
             </div>
 
-            {/* Nút Yêu thích (giao diện giữ nguyên: chưa bấm viền xám, bấm rồi nền đỏ tim trắng, không hiện tổng tim) */}
+            {/* Nút Yêu thích */}
             <button 
               type="button"
               onClick={handleToggleFavorite}
@@ -449,45 +505,8 @@ const WatchPage = () => {
                 </span>
               )}
             </button>
-
-            {/* Player Test Controls */}
-            <button 
-              type="button"
-              onClick={handlePlayExternal}
-              className="px-3.5 py-2 rounded-xl bg-neon-red/20 hover:bg-neon-red/30 border border-neon-red/40 text-neon-red text-xs font-semibold transition-all cursor-pointer"
-            >
-              ▶ Play()
-            </button>
           </div>
         </div>
-
-        {/* Series episode selection (Max 100 per range). Movies have one full stream. */}
-        {!isMovie && <div className="p-6 rounded-2xl glass-panel space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <h3 className="text-base font-bold text-white flex items-center gap-2">
-              <span className="w-1.5 h-4 bg-red-600 rounded-full"></span>
-              <span>Danh Sách Chọn Tập Phim</span>
-              <span className="text-xs text-amber-400 font-extrabold px-2.5 py-0.5 rounded-full bg-amber-400/15 border border-amber-400/30">
-                {episodes.length} Tập
-              </span>
-            </h3>
-            <span className="text-xs text-neon-cyan font-semibold">Click tập bất kỳ để chuyển luồng phát ngay lập tức</span>
-          </div>
-
-          <EpisodeSelector
-            episodes={episodes}
-            servers={movieServers || []}
-            activeServerName={resolvedServerName}
-            onSelectServer={(name) => {
-              setActiveServerName(name);
-              const nextParams = new URLSearchParams(searchParams);
-              nextParams.set('server', name);
-              setSearchParams(nextParams, { replace: true });
-            }}
-            activeEpisode={currentEpName}
-            onSelectEpisode={(epNum) => handleSelectEpisode(epNum)}
-          />
-        </div>}
         <MovieComments movieId={String(activeId)} />
           </div>
 

@@ -3,6 +3,7 @@ import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import LoadingScreen from '../components/common/LoadingScreen';
 import Navbar from '../components/common/Navbar';
+import Footer from '../components/common/Footer';
 
 // Code Splitting Client Pages with React.lazy
 const HomePage = lazy(() => import('../pages/client/HomePage'));
@@ -13,34 +14,18 @@ const LoginPage = lazy(() => import('../pages/client/LoginPage'));
 const NotFoundPage = lazy(() => import('../pages/client/NotFoundPage'));
 
 /**
- * Auth Guard: Redirects to /login if not logged in
- */
-const RequireAuth = ({ children }) => {
-  const { currentUser, loading } = useAuth();
-
-  if (loading) {
-    return <LoadingScreen message="Đang xác thực..." />;
-  }
-
-  if (!currentUser) {
-    return <Navigate to="/login" replace />;
-  }
-
-  return children;
-};
-
-/**
- * Client Area Routing System with Code Splitting & Global Navbar
+ * Client Area Routing System with Code Splitting & Global Navbar.
+ * Guests can browse and watch directly; login is optional for account features.
  */
 const ClientRouters = () => {
   const { currentUser, loading } = useAuth();
-  const { search } = useLocation();
+  const { pathname, search } = useLocation();
   const adminLogin = new URLSearchParams(search).get('admin') === '1';
 
   return (
     <>
-      {/* Global Top Navbar on all client pages (only show when logged in) */}
-      {currentUser && <Navbar />}
+      {/* Global Top Navbar on all client pages except /login */}
+      {pathname !== '/login' && <Navbar />}
 
       <Suspense fallback={<LoadingScreen message="Đang tải giao diện người dùng..." />}>
         <Routes>
@@ -50,21 +35,23 @@ const ClientRouters = () => {
             currentUser && !adminLogin ? <Navigate to="/" replace /> : <LoginPage />
           } />
 
-          {/* All other routes require authentication */}
-          <Route path="/" element={<RequireAuth><HomePage /></RequireAuth>} />
-          <Route path="/the-loai" element={<RequireAuth><CategoryPage /></RequireAuth>} />
-          <Route path="/category" element={<RequireAuth><CategoryPage /></RequireAuth>} />
-          <Route path="/genres" element={<RequireAuth><CategoryPage /></RequireAuth>} />
+          {/* Public client routes: accessible to both guests and logged-in users */}
+          <Route path="/" element={<HomePage />} />
+          <Route path="/the-loai" element={<CategoryPage />} />
+          <Route path="/category" element={<CategoryPage />} />
+          <Route path="/genres" element={<CategoryPage />} />
           {/* SEO Slug Routing */}
-          <Route path="/movie/:slug" element={<RequireAuth><MovieDetailPage /></RequireAuth>} />
-          <Route path="/movie/:slug/:episode" element={<RequireAuth><WatchPage /></RequireAuth>} />
+          <Route path="/movie/:slug" element={<MovieDetailPage />} />
+          <Route path="/movie/:slug/:episode" element={<WatchPage />} />
           {/* Legacy fallback routes for backward compatibility */}
-          <Route path="/watch/:id" element={<RequireAuth><WatchPage /></RequireAuth>} />
-          <Route path="/watch/:id/:episode" element={<RequireAuth><WatchPage /></RequireAuth>} />
-          <Route path="/search" element={<RequireAuth><CategoryPage /></RequireAuth>} />
-          <Route path="*" element={<RequireAuth><NotFoundPage /></RequireAuth>} />
+          <Route path="/watch/:id" element={<WatchPage />} />
+          <Route path="/watch/:id/:episode" element={<WatchPage />} />
+          <Route path="/search" element={<CategoryPage />} />
+          <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </Suspense>
+
+      {pathname !== '/login' && <Footer />}
     </>
   );
 };

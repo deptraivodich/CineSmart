@@ -252,7 +252,7 @@ const HomePage = () => {
           </div>
         </div>
       ) : activeHeroMovie ? (
-        <div className="relative w-full h-[70vh] sm:h-[78vh] md:h-[84vh] min-h-[540px] max-h-[780px] overflow-hidden">
+        <div className="relative w-full min-h-[560px] sm:min-h-[620px] md:min-h-[680px] flex items-end overflow-hidden">
 
           {/* Background Image with Smooth Fade */}
           <div className="absolute inset-0">
@@ -266,9 +266,9 @@ const HomePage = () => {
             <div className="absolute inset-0 bg-gradient-to-r from-background/95 via-background/50 to-transparent"></div>
           </div>
 
-          {/* Hero Content Overlay with pt-24 to safely clear the fixed top navbar */}
-          <div className="absolute inset-0 max-w-7xl mx-auto px-4 md:px-12 flex flex-col justify-end pt-24 pb-14 md:pb-20 z-10">
-            <div className="max-w-2xl lg:max-w-3xl space-y-3.5">
+          {/* Hero Content Overlay with pt-28 to safely clear the fixed top navbar */}
+          <div className="relative w-full max-w-7xl mx-auto px-4 md:px-12 pt-28 pb-14 md:pb-20 z-10">
+            <div className="max-w-2xl lg:max-w-3xl space-y-4">
 
               {/* Badges */}
               <div className="flex flex-wrap items-center gap-2">
@@ -286,13 +286,13 @@ const HomePage = () => {
                 </span>
               </div>
 
-              {/* Movie Title in Proper Sentence Case (No uppercase forced class) */}
-              <h1 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-black text-white leading-snug drop-shadow-2xl font-display tracking-tight line-clamp-3">
+              {/* Movie Title in Proper Sentence Case with generous line-height for Vietnamese accents */}
+              <h1 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-black text-white leading-[1.5] sm:leading-[1.45] md:leading-[1.45] lg:leading-[1.45] drop-shadow-2xl font-display tracking-normal break-words">
                 {formatVietnameseSentenceCase(activeHeroMovie?.title || 'Phim mới')}
               </h1>
 
               {activeHeroMovie?.originalTitle && (
-                <p className="text-xs sm:text-sm md:text-base text-amber-300 font-semibold drop-shadow-md">
+                <p className="text-xs sm:text-sm md:text-base text-amber-300 font-semibold drop-shadow-md leading-relaxed">
                   {activeHeroMovie.originalTitle}
                 </p>
               )}
@@ -856,85 +856,6 @@ const HomePage = () => {
 
           </div>
         </section>
-
-        {/* SECTION 4: Kho tàng anime mới nhất */}
-        {(animeHighlight || animeVaultMovies.length > 0) && (
-          <section className="space-y-6 pt-4 border-t border-white/10">
-            <div className="flex items-center space-x-2.5">
-              <div className="w-1.5 h-5 shrink-0 rounded-full bg-pink-500 shadow-[0_0_12px_#ec4899]"></div>
-              <h2 className="text-lg md:text-xl font-extrabold text-white flex flex-wrap items-center gap-2 min-w-0">
-                <span>Kho Tàng Anime Mới Nhất</span>
-                <span className="text-[10px] px-2 py-0.5 rounded bg-pink-500/20 text-pink-400 border border-pink-500/30">⚔️ World of Anime</span>
-              </h2>
-            </div>
-
-            {/* Large Highlight Anime Banner */}
-            {animeHighlight && (
-              <div className="relative w-full h-56 sm:h-72 rounded-2xl overflow-hidden border border-pink-500/30 shadow-2xl flex items-end p-6">
-                <img
-                  src={animeHighlight?.banner || animeHighlight?.poster || 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=1200'}
-                  alt={animeHighlight?.title || 'Anime'}
-                  onError={(e) => { e.target.src = 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=1200'; }}
-                  className="absolute inset-0 w-full h-full object-cover opacity-80 scale-105"
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-[#151928] via-[#151928]/60 to-transparent"></div>
-                <div className="relative z-10 space-y-2 max-w-xl">
-                  <span className="px-2.5 py-1 rounded-md bg-pink-600 text-white text-[10px] font-black uppercase tracking-wider">
-                    Siêu Phẩm Anime Highlights
-                  </span>
-                  <h3 className="text-2xl sm:text-3xl font-black text-white drop-shadow-md uppercase">
-                    {animeHighlight?.title || 'Anime Highlight'}
-                  </h3>
-                  <p className="text-xs text-gray-300 line-clamp-2">
-                    {animeHighlight?.description || 'Hành trình sinh tồn và trưởng thành đầy xúc cảm tại thế giới anime đỉnh cao.'}
-                  </p>
-                  {animeHighlight?.id && (
-                    <div className="pt-1">
-                      <Link
-                        to={`/movie/${generateSlug(animeHighlight.title) || animeHighlight.id}/tap-1`}
-                        className="inline-flex items-center space-x-2 px-5 py-2 rounded-xl bg-pink-600 hover:bg-pink-500 text-white font-bold text-xs shadow-lg transition-all"
-                      >
-                        <span>Xem Ngay Tập Mới</span>
-                      </Link>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* List of Recent Anime Episode Cards Underneath */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              {animeVaultMovies
-                .filter(anime => anime !== undefined && anime !== null && anime.id)
-                .map((anime, idx) => {
-                  const animeKey = anime?.id || `anime-${idx}`;
-                  return (
-                    <Link
-                      key={animeKey}
-                      to={`/movie/${generateSlug(anime?.title) || anime?.id}/tap-1`}
-                      className="flex items-center space-x-3 p-3 rounded-xl bg-surface-card border border-glass-border hover:border-pink-500/50 transition-all group"
-                    >
-                      <div className="w-20 h-14 rounded-lg overflow-hidden flex-shrink-0 relative border border-white/10">
-                        <img
-                          src={anime?.poster || 'https://images.unsplash.com/photo-1534447677768-be436bb09401?w=200'}
-                          alt={anime?.title || 'Anime'}
-                          onError={(e) => { e.target.src = 'https://images.unsplash.com/photo-1534447677768-be436bb09401?w=200'; }}
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                        />
-                        <span className="absolute bottom-1 right-1 text-[9px] px-1 rounded bg-black/80 text-pink-400 font-bold">
-                          {isFeatureMovie(anime) ? 'Movie' : typeof anime?.episodes === 'string' ? anime.episodes : (Array.isArray(anime?.episodes) ? `${anime.episodes.length} Tập` : 'Tập 1')}
-                        </span>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <h4 className="text-xs font-bold text-white truncate group-hover:text-pink-400">{anime?.title || 'Anime'}</h4>
-                        <p className="text-[10px] text-gray-400 mt-1">Cập nhật 4K Vietsub</p>
-                      </div>
-                    </Link>
-                  );
-                })}
-            </div>
-          </section>
-        )}
 
       </div>
 
