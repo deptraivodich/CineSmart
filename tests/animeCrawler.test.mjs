@@ -730,3 +730,37 @@ test('multi-server episodes (Vietsub, Lồng Tiếng, Thuyết Minh) are crawled
   assert.equal(update.action, 'update');
   assert.equal(update.data.servers.find(s => s.name === 'Lồng Tiếng').episodes.length, 2);
 });
+
+
+test('near-match identity merges minor typos when year/country match, but never confuses ss1 vs ss2', () => {
+  const ss1 = { id: 'legacy-ss1', title: 'ReZero ss1', originalTitle: 'Re:Zero kara Hajimeru Isekai Seikatsu ss1', year: '2026', country: 'Nhật Bản' };
+  const ss2 = { title: 'ReZero ss2', originalTitle: 'Re:Zero kara Hajimeru Isekai Seikatsu ss2', year: '2026', country: 'Nhật Bản', sourceSlug: 'rezero-ss2' };
+  assert.equal(findMovie([ss1], ss2), null);
+
+  const num1 = { id: 'legacy-1', title: 'Mob Psycho 1', originalTitle: 'Mob Psycho 1', year: '2026', country: 'Nhật Bản' };
+  const num2 = { title: 'Mob Psycho 2', originalTitle: 'Mob Psycho 2', year: '2026', country: 'Nhật Bản', sourceSlug: 'mob-psycho-2' };
+  assert.equal(findMovie([num1], num2), null);
+
+  const typoLegacy = { id: 'legacy-typo', title: 'ReZero Bat dau lai o the gioi khac', originalTitle: 'ReZero kara Hajimeru', year: '2026', country: 'Nhật Bản' };
+  const incomingTypo = { title: 'Re:Zero - Bắt đầu lại ở thế giới khác', originalTitle: 'Re:Zero kara Hajimeru', year: '2026', country: 'Nhật Bản', sourceSlug: 'rezero-remake' };
+  assert.equal(findMovie([typoLegacy], incomingTypo)?.id, 'legacy-typo');
+
+  const wrongCountry = { ...typoLegacy, id: 'legacy-kr', country: 'Hàn Quốc' };
+  assert.equal(findMovie([wrongCountry], incomingTypo), null);
+});
+
+test('targeted lookup avoids scanning unrelated movies on startup and subsequent runs', async () => {
+  const seed = {};
+  for (let i = 0; i < 50; i++) {
+    seed['movies/unrelated-' + i] = { title: 'Old Movie ' + i, originalTitle: 'Old ' + i, year: String(2000 + (i % 20)), slug: 'old-' + i, sourceSlug: 'old-' + i, country: 'Nhật Bản' };
+  }
+  const db = new MemoryFirestore(seed);
+  const first = await run(db, fixtureSource({ pages: { 1: ['anime-one'], 2: ['anime-two'] } }));
+  assert.equal(first.stats.new, 2);
+  assert.ok(db.movieReads <= 10, 'Expected targeted reads only, got ' + db.movieReads);
+
+  db.movieReads = 0;
+  const second = await run(db, fixtureSource({ pages: { 1: ['anime-one'], 2: ['anime-two'] } }));
+  assert.equal(second.stats.skip, 2);
+  assert.ok(db.movieReads <= 6, 'Expected direct doc reads only on repeat run, got ' + db.movieReads);
+});
