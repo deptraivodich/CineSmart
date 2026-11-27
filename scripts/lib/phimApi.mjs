@@ -60,17 +60,21 @@ export function createSource({ fetchImpl = fetch, sleep = ms => new Promise(r =>
   }
   return {
     async page(page) {
-      const data = await json(listUrl(page));
+      const targetUrl = listUrl(page);
+      const searchParams = new URL(targetUrl).searchParams;
+      const expectedPage = Number(searchParams.get('page') || page);
+      const expectedCountry = searchParams.get('country') || 'nhat-ban';
+      const data = await json(targetUrl);
       if (data?.status !== 'success' && data?.status !== true) throw new SourceError('Invalid list status', { retryable: true });
       const items = data?.data?.items;
       if (!Array.isArray(items) || items.length > 100) throw new SourceError('Invalid list items', { retryable: true });
       const current = data.data?.params?.pagination?.currentPage;
-      if (current !== undefined && Number(current) !== page) throw new SourceError('Source pagination mismatch');
+      if (current !== undefined && Number(current) !== expectedPage) throw new SourceError('Source pagination mismatch');
       const params = data.data.params || {};
       const countries = Array.isArray(params.filterCountry) ? params.filterCountry.filter(Boolean) : null;
       if ((params.slug !== undefined && params.slug !== 'hoat-hinh') ||
           (params.type_slug !== undefined && params.type_slug !== 'danh-sach') ||
-          (params.filterCountry !== undefined && (!Array.isArray(countries) || countries.length !== 1 || countries[0] !== 'nhat-ban')) ||
+          (params.filterCountry !== undefined && (!Array.isArray(countries) || countries.length !== 1 || countries[0] !== expectedCountry)) ||
           (params.sortField !== undefined && params.sortField !== 'modified.time') ||
           (params.sortType !== undefined && params.sortType !== 'desc')) throw new SourceError('Source filter/sort echo mismatch');
       const result = items.map(item => { detailUrl(item.slug); return { slug: item.slug }; });

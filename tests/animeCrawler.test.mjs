@@ -52,9 +52,13 @@ test('automatic options always pages 1-2; reject page 0, 11, fractions and rever
   }
 });
 test('source validates real API-shaped list pagination and slug identities', async () => {
-  const s = createSource({ sleep: async () => {}, fetchImpl: async () => response(200, { status: 'success', data: { items: [{ slug: 'anime-one' }], params: { pagination: { currentPage: 1 } } } }) });
+  const s = createSource({ sleep: async () => {}, fetchImpl: async url => { const country = new URL(url).searchParams.get('country'); return response(200, { status: 'success', data: { items: [{ slug: country === 'trung-quoc' ? 'donghua-one' : 'anime-one' }], params: { filterCountry: [country], pagination: { currentPage: 1 } } } }); } });
   assert.deepEqual(await s.page(1), [{ slug: 'anime-one' }]);
-  await assert.rejects(s.page(2), /pagination mismatch/);
+  assert.deepEqual(await s.page(2), [{ slug: 'donghua-one' }]);
+  const badPage = createSource({ sleep: async () => {}, fetchImpl: async () => response(200, { status: 'success', data: { items: [{ slug: 'anime-one' }], params: { filterCountry: ['trung-quoc'], pagination: { currentPage: 2 } } } }) });
+  await assert.rejects(badPage.page(2), /pagination mismatch/);
+  const badCountry = createSource({ sleep: async () => {}, fetchImpl: async () => response(200, { status: 'success', data: { items: [{ slug: 'anime-one' }], params: { filterCountry: ['nhat-ban'], pagination: { currentPage: 1 } } } }) });
+  await assert.rejects(badCountry.page(2), /filter\/sort echo mismatch/);
 });
 test('only Japanese animation details are imported; foreign, live-action and missing country excluded', async () => {
   const foreign = detail('foreign'); foreign.movie.country = [{ slug: 'han-quoc' }]; assert.equal(isSupportedAnimation(detail('donghua', 1).movie), true);
