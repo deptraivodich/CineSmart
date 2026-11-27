@@ -1,9 +1,9 @@
 name: CineSmart Daily Japanese Anime
 on:
   schedule:
-    # 18:30 UTC = 01:30 Vietnam (UTC+7), on the following calendar day.
+    # 09:00 UTC = 16:00 Vietnam (UTC+7), after the Pacific-midnight quota reset.
     # GitHub may delay scheduled runs; durable work resumes at the next invocation.
-    - cron: '30 18 * * *'
+    - cron: '0 9 * * *'
     # 16:30 Vietnam: recover after the Pacific-midnight free quota reset.
     # A completed full sync for the same Vietnam day skips this recovery run.
     - cron: '30 9 * * *'

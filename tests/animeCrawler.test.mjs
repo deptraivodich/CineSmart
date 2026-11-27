@@ -266,7 +266,7 @@ test('manual browser fallback retains original list filters and preserves full e
 });
 test('workflow is daily Vietnam time, read-only repository permission and one cross-branch concurrency group', async () => {
   const yaml = await readFile(new URL('../.github/workflows/daily-anime-crawler.yml', import.meta.url), 'utf8');
-  assert.match(yaml, /30 18 \* \* \*/);
+  assert.match(yaml, /0 9 \* \* \*/);
   assert.match(yaml, /30 9 \* \* \*/);
   assert.match(yaml, /group: cinesmart-firestore-anime-writer/);
   assert.match(yaml, /cancel-in-progress: false/);
