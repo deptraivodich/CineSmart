@@ -1,10 +1,45 @@
-import { collection, doc, getDocsFromServer, limit, query, runTransaction } from 'firebase/firestore';
+import { collection, doc, getDocFromServer, getDocsFromServer, limit, query, runTransaction, where } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 import { adminRequest, getAdminIdToken } from './adminSession';
 import { findMovie, planImport, sourceMovieId } from '../utils/movieImport.js';
-import { saveStoredMovies } from './movieService';
+import { getStoredMovies, saveStoredMovies } from './movieService';
 
 export const searchKKPhim = (keyword, page, signal) => adminRequest({ operation: 'search', keyword, page }, { signal });
+
+async function resolveTargetMovieId(incoming, slug, yearCache, runCatalog) {
+  if (runCatalog.size) {
+    const inRun = findMovie([...runCatalog.values()], incoming);
+    if (inRun) return inRun.id;
+  }
+  const directId = sourceMovieId(slug);
+  const directSnap = await getDocFromServer(doc(db, 'movies', directId));
+  if (directSnap.exists()) return directSnap.id;
+
+  const moviesCol = collection(db, 'movies');
+  const [bySourceSnap, bySlugSnap] = await Promise.all([
+    getDocsFromServer(query(moviesCol, where('sourceSlug', '==', slug), limit(2))),
+    getDocsFromServer(query(moviesCol, where('slug', '==', slug), limit(2))),
+  ]);
+  const exact = new Map();
+  for (const d of [...bySourceSnap.docs, ...bySlugSnap.docs]) exact.set(d.id, { ...d.data(), id: d.id });
+  if (exact.size > 1) throw new Error('Phim bị trùng định danh nguồn trong kho; cần xử lý thủ công.');
+  if (exact.size === 1) return [...exact.keys()][0];
+
+  const yearStr = String(incoming.year ?? '').trim();
+  if (!yearStr) return directId;
+  if (!yearCache.has(yearStr)) {
+    const yearNum = /^\d{4}$/.test(yearStr) ? Number(yearStr) : null;
+    const yearFilter = yearNum !== null ? where('year', 'in', [yearStr, yearNum]) : where('year', '==', yearStr);
+    const snap = await getDocsFromServer(query(moviesCol, yearFilter, limit(1000)));
+    yearCache.set(yearStr, snap.docs.map(d => ({ ...d.data(), id: d.id })));
+  }
+  const candidates = new Map(yearCache.get(yearStr).map(m => [m.id, m]));
+  for (const [id, m] of runCatalog) {
+    if (String(m.year ?? '').trim() === yearStr) candidates.set(id, m);
+  }
+  const match = candidates.size ? findMovie([...candidates.values()], incoming) : null;
+  return match?.id || directId;
+}
 
 export async function importKKPhim(slugs, { signal, onResult = () => {} } = {}) {
   await getAdminIdToken();
@@ -14,9 +49,9 @@ export async function importKKPhim(slugs, { signal, onResult = () => {} } = {}) 
     if (!owner || auth.currentUser !== owner) throw new Error('Phiên Admin đã thay đổi. Hãy đăng nhập lại.');
   };
   check();
-  const snapshot = await getDocsFromServer(query(collection(db, 'movies'), limit(10001)));
-  if (snapshot.size > 10000) throw new Error('Kho phim quá lớn để kiểm tra trùng.');
-  const catalog = snapshot.docs.map(item => ({ ...item.data(), id: item.id }));
+  const yearCache = new Map();
+  const runCatalog = new Map();
+  const cachedMovies = getStoredMovies();
   for (const slug of slugs) {
     check();
     try {
@@ -24,8 +59,9 @@ export async function importKKPhim(slugs, { signal, onResult = () => {} } = {}) 
       check();
       const incoming = result.movies?.[0];
       if (incoming?.sourceSlug !== slug || !incoming.episodes?.length) throw new Error('Phim chưa có tập phát hợp lệ.');
-      const match = findMovie(catalog, incoming);
-      const ref = doc(db, 'movies', match?.id || sourceMovieId(slug));
+      const targetId = await resolveTargetMovieId(incoming, slug, yearCache, runCatalog);
+      check();
+      const ref = doc(db, 'movies', targetId);
       await getAdminIdToken();
       const saved = await runTransaction(db, async tx => {
         const current = await tx.get(ref);
@@ -37,9 +73,10 @@ export async function importKKPhim(slugs, { signal, onResult = () => {} } = {}) 
         else if (plan.action === 'update') tx.update(ref, plan.data);
         return { ...plan, movie: { ...existing, ...plan.data, id: ref.id } };
       });
-      const index = catalog.findIndex(movie => movie.id === ref.id);
-      if (index < 0) catalog.push(saved.movie); else catalog[index] = saved.movie;
-      saveStoredMovies(catalog);
+      runCatalog.set(ref.id, saved.movie);
+      const index = cachedMovies.findIndex(movie => movie.id === ref.id);
+      if (index < 0) cachedMovies.unshift(saved.movie); else cachedMovies[index] = saved.movie;
+      saveStoredMovies(cachedMovies);
       onResult({ slug, title: saved.movie.title, ok: true, action: saved.action, episodes: saved.movie.episodes?.length || 0 });
     } catch (error) {
       if (signal?.aborted || auth.currentUser !== owner) throw error;
